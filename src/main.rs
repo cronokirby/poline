@@ -77,6 +77,7 @@ impl<'a> Iterator for Lexer<'a> {
             match c {
                 '{' => return Some(Ok(Token::OpenBrace)),
                 '}' => return Some(Ok(Token::CloseBrace)),
+                ';' => return Some(Ok(Token::Semicolon)),
                 't' => {
                     if self.same('o') {
                         return Some(Ok(Token::To));
@@ -101,6 +102,13 @@ fn main() {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn lexer_works_for_semicolons() {
+        let text = ";;";
+        let tokens: Vec<LexResult> = Lexer::new(text).collect();
+        assert_eq!(tokens, vec![Ok(Token::Semicolon), Ok(Token::Semicolon)]);
+    }
 
     #[test]
     fn lexer_works_for_braces() {
