@@ -3,12 +3,13 @@ fn printrecv() {
     print x;
 }
 
-fn syn(x) {
-    print x;
+fn both(a, b) {
+    print a;
+    print b;
 }
 
 fn main {
     spawn printrecv() as p;
     send "foo" to p;
-    syn("done");
+    both("a", "b");
 }
