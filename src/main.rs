@@ -41,6 +41,8 @@ enum Token {
 enum LexError {
     /// Represents generic failure.
     Failed,
+    /// Represents failure due to an unterminated string
+    UnterminatedString,
 }
 
 type LexResult = Result<Token, LexError>;
@@ -67,6 +69,23 @@ impl<'a> Lexer<'a> {
             _ => false,
         }
     }
+
+    fn string(&mut self) -> Result<String, LexError> {
+        let mut acc = String::new();
+        let mut terminated = false;
+        while let Some(c) = self.chars.next() {
+            if c == '"' {
+                terminated = true;
+                break;
+            }
+            acc.push(c);
+        }
+        if terminated {
+            Ok(acc)
+        } else {
+            Err(LexError::UnterminatedString)
+        }
+    }
 }
 
 impl<'a> Iterator for Lexer<'a> {
@@ -88,6 +107,7 @@ impl<'a> Iterator for Lexer<'a> {
                         return Some(Ok(Token::As));
                     }
                 }
+                '"' => return Some(self.string().map(Token::Str)),
                 // Simply ignore whitespace between tokens
                 w if w.is_whitespace() => {}
                 _ => return Some(Err(LexError::Failed)),
@@ -132,5 +152,13 @@ mod test {
         let text = ";   \t\n;";
         let tokens: Vec<LexResult> = Lexer::new(text).collect();
         assert_eq!(tokens, vec![Ok(Token::Semicolon), Ok(Token::Semicolon)]);
+    }
+
+    #[test]
+    fn lexer_can_parse_strings() {
+        let text = "\"foo\";";
+        let tokens: Vec<LexResult> = Lexer::new(text).collect();
+        let expected = vec![Ok(Token::Str(String::from("foo"))), Ok(Token::Semicolon)];
+        assert_eq!(tokens, expected);
     }
 }
