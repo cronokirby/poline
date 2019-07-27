@@ -103,6 +103,9 @@ impl<'a> Iterator for Lexer<'a> {
                 '{' => return Some(Ok(Token::OpenBrace)),
                 '}' => return Some(Ok(Token::CloseBrace)),
                 ';' => return Some(Ok(Token::Semicolon)),
+                '(' => return Some(Ok(Token::OpenParens)),
+                ')' => return Some(Ok(Token::CloseParens)),
+                ',' => return Some(Ok(Token::Comma)),
                 't' => {
                     if self.same('o') {
                         return Some(Ok(Token::To));
@@ -173,5 +176,13 @@ mod test {
         let text = "\"bad";
         let tokens: Vec<LexResult> = Lexer::new(text).collect();
         assert_eq!(tokens, vec![Err(LexError::UnterminatedString)]);
+    }
+
+    #[test]
+    fn lexer_works_on_parens_and_comma() {
+        let text = "(,)";
+        let tokens: Vec<LexResult> = Lexer::new(text).collect();
+        let expected = vec![Ok(Token::OpenParens), Ok(Token::Comma), Ok(Token::CloseParens)];
+        assert_eq!(tokens, expected);
     }
 }
