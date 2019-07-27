@@ -88,6 +88,8 @@ impl<'a> Iterator for Lexer<'a> {
                         return Some(Ok(Token::As));
                     }
                 }
+                // Simply ignore whitespace between tokens
+                w if w.is_whitespace() => {}
                 _ => return Some(Err(LexError::Failed)),
             }
         }
@@ -123,5 +125,12 @@ mod test {
         let tokens: Vec<LexResult> = Lexer::new(text).collect();
         let expected = vec![Ok(Token::To), Ok(Token::As)];
         assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn lexer_ignores_whitespace() {
+        let text = ";   \t\n;";
+        let tokens: Vec<LexResult> = Lexer::new(text).collect();
+        assert_eq!(tokens, vec![Ok(Token::Semicolon), Ok(Token::Semicolon)]);
     }
 }
