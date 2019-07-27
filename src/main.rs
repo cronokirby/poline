@@ -161,4 +161,11 @@ mod test {
         let expected = vec![Ok(Token::Str(String::from("foo"))), Ok(Token::Semicolon)];
         assert_eq!(tokens, expected);
     }
+
+    #[test]
+    fn lexer_errors_on_unterminated_strings() {
+        let text = "\"bad";
+        let tokens: Vec<LexResult> = Lexer::new(text).collect();
+        assert_eq!(tokens, vec![Err(LexError::UnterminatedString)]);
+    }
 }
