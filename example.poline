@@ -1,10 +1,14 @@
-fn printrecv {
+fn printrecv() {
     recv x;
     print x;
 }
 
+fn syn(x) {
+    print x;
+}
+
 fn main {
-    spawn printrecv as p;
+    spawn printrecv() as p;
     send "foo" to p;
-    print "done"; 
+    syn("done");
 }
