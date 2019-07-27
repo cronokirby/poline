@@ -1,0 +1,10 @@
+fn printrecv {
+    recv x;
+    print x;
+}
+
+fn main {
+    spawn printrecv as p;
+    send "foo" to p;
+    print "done"; 
+}
