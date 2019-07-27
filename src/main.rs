@@ -28,6 +28,12 @@ enum Token {
     OpenBrace,
     /// Represents the last brace in a function; corresponds to `}`.
     CloseBrace,
+    /// Represents the first parens in a function; corresponds to `(`.
+    OpenParens,
+    /// Represents the last parens in a function; corresponds to `)`.
+    CloseParens,
+    /// The comma is used for arguments; corresponds to `,`.
+    Comma,
     /// Represents the end of a statement; corresponds to `;`.
     Semicolon,
     /// Represents a string litteral; e.g. `"abc"`, `"bar"`.
