@@ -182,7 +182,11 @@ mod test {
     fn lexer_works_on_parens_and_comma() {
         let text = "(,)";
         let tokens: Vec<LexResult> = Lexer::new(text).collect();
-        let expected = vec![Ok(Token::OpenParens), Ok(Token::Comma), Ok(Token::CloseParens)];
+        let expected = vec![
+            Ok(Token::OpenParens),
+            Ok(Token::Comma),
+            Ok(Token::CloseParens),
+        ];
         assert_eq!(tokens, expected);
     }
 }
