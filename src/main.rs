@@ -297,7 +297,6 @@ impl Parser {
     fn arg_names(&mut self) -> ParseResult<Vec<String>> {
         self.expect(&Token::OpenParens)?;
         let mut args = Vec::new();
-        dbg!(self.peek());
         if let Some(Token::Name(s)) = self.peek() {
             let mine = s.to_owned();
             self.advance();
@@ -328,6 +327,7 @@ impl Parser {
             _ => None,
         };
         if let Some(arg) = first_argument {
+            self.advance();
             args.push(arg);
             while self.check(&Token::Comma) {
                 self.advance();
@@ -430,7 +430,6 @@ fn main() -> io::Result<()> {
         println!("Lexing errors: {:?}", &errors);
         return Ok(())
     }
-    println!("Tokens: {:?}", &tokens);
     println!("Lexing ok!");
     let mut parser = Parser::new(tokens);
     let result = parser.syntax();
