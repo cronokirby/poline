@@ -156,6 +156,49 @@ impl<'a> Iterator for Lexer<'a> {
     }
 }
 
+/// Represents a syntactical argument.
+enum Argument {
+    /// A variable name.
+    Name(String),
+    /// A String litteral.
+    Litteral(String),
+}
+
+/// Represents a function call synactically.
+struct FunctionCall {
+    /// The name of the function being called.
+    name: String,
+    /// A series of arguments being passed to the call.
+    args: Vec<Argument>,
+}
+
+/// A statement is a single operation inside the body of a function.
+enum Statement {
+    /// Represents printing an argument out.
+    Print(Argument),
+    /// Represents receiving a message inside a variable.
+    Recv(String),
+    /// Represents spawning a new thread with a function call and name.
+    Spawn(FunctionCall, String),
+    /// Represents a send operation to a given thread.
+    Send(Argument, String),
+    /// Represents a function call as a statement.
+    Call(FunctionCall),
+}
+
+/// Represents a single function declaration.
+///
+/// A Poline program is composed of a list of function declarations, one
+/// of which is the main function.
+struct FunctionDeclaration {
+    /// The name associated with the function.
+    name: String,
+    /// The names of the variables declared for use in the function.
+    arg_names: Vec<String>,
+    /// The body of a function is composed of a series of a statements.
+    body: Vec<Statement>,
+}
+
 fn main() -> io::Result<()> {
     let mut args = std::env::args();
     args.next();
