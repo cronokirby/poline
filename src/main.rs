@@ -4,6 +4,29 @@ use std::io::prelude::*;
 use std::iter::Peekable;
 use std::str::Chars;
 
+/// Represents the branch variant for a given token
+///
+/// These exist because the parser needs to know the branch of a given
+/// enum without matching on its contents.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TokenType {
+    Function,
+    Recv,
+    Send,
+    To,
+    Spawn,
+    As,
+    Print,
+    OpenBrace,
+    CloseBrace,
+    OpenParens,
+    CloseParens,
+    Comma,
+    Semicolon,
+    Str,
+    Name,
+}
+
 /// Represents the Tokens that compose the language.
 ///
 /// The first step in going from a textual representation of the language to
@@ -43,6 +66,28 @@ enum Token {
     Str(String),
     /// Represents a variable; e.g. `x`, `baz`.
     Name(String),
+}
+
+impl Token {
+    fn typ(&self) -> TokenType {
+        match *self {
+            Token::Function => TokenType::Function,
+            Token::Recv => TokenType::Recv,
+            Token::Send => TokenType::Send,
+            Token::To => TokenType::To,
+            Token::Spawn => TokenType::Spawn,
+            Token::As => TokenType::As,
+            Token::Print => TokenType::Print,
+            Token::OpenBrace => TokenType::OpenBrace,
+            Token::CloseBrace => TokenType::CloseBrace,
+            Token::OpenParens => TokenType::OpenParens,
+            Token::CloseParens => TokenType::CloseParens,
+            Token::Comma => TokenType::Comma,
+            Token::Semicolon => TokenType::Semicolon,
+            Token::Str(_) => TokenType::Str,
+            Token::Name(_) => TokenType::Name,
+        }
+    }
 }
 
 /// Represents the type of errors that can occurr while lexing.
@@ -197,6 +242,52 @@ struct FunctionDeclaration {
     arg_names: Vec<String>,
     /// The body of a function is composed of a series of a statements.
     body: Vec<Statement>,
+}
+
+/// This holds the information and state necessary to parse items.
+struct Parser {
+    /// A sequence of tokens composing the program we want to compile.
+    tokens: Vec<Token>,
+    /// Our current position in the sequence of tokens.
+    position: usize,
+}
+
+impl Parser {
+    fn at_end(&self) -> bool {
+        self.position == self.tokens.len()
+    }
+
+    fn peek<'a>(&'a self) -> Option<&'a Token> {
+        self.tokens.get(self.position)
+    }
+
+    fn previous<'a>(&'a self) -> &'a Token {
+        &self.tokens[self.position - 1]
+    }
+
+    fn advance<'a>(&'a mut self) -> &'a Token {
+        if !self.at_end() {
+            self.position += 1;
+        }
+        self.previous()
+    }
+
+    fn check(&self, typ: TokenType) -> bool {
+        match self.peek() {
+            Some(token) if token.typ() == typ => true,
+            _ => false,
+        }
+    }
+
+    fn any(&mut self, types: &[TokenType]) -> bool {
+        for typ in types {
+            if self.check(*typ) {
+                self.advance();
+                return true;
+            }
+        }
+        false
+    }
 }
 
 fn main() -> io::Result<()> {
