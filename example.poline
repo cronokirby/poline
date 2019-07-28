@@ -8,7 +8,7 @@ fn both(a, b) {
     print b;
 }
 
-fn main {
+fn main() {
     spawn printrecv() as p;
     send "foo" to p;
     both("a", "b");
