@@ -4,29 +4,6 @@ use std::io::prelude::*;
 use std::iter::Peekable;
 use std::str::Chars;
 
-/// Represents the branch variant for a given token
-///
-/// These exist because the parser needs to know the branch of a given
-/// enum without matching on its contents.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum TokenType {
-    Function,
-    Recv,
-    Send,
-    To,
-    Spawn,
-    As,
-    Print,
-    OpenBrace,
-    CloseBrace,
-    OpenParens,
-    CloseParens,
-    Comma,
-    Semicolon,
-    Str,
-    Name,
-}
-
 /// Represents the Tokens that compose the language.
 ///
 /// The first step in going from a textual representation of the language to
@@ -66,28 +43,6 @@ enum Token {
     Str(String),
     /// Represents a variable; e.g. `x`, `baz`.
     Name(String),
-}
-
-impl Token {
-    fn typ(&self) -> TokenType {
-        match *self {
-            Token::Function => TokenType::Function,
-            Token::Recv => TokenType::Recv,
-            Token::Send => TokenType::Send,
-            Token::To => TokenType::To,
-            Token::Spawn => TokenType::Spawn,
-            Token::As => TokenType::As,
-            Token::Print => TokenType::Print,
-            Token::OpenBrace => TokenType::OpenBrace,
-            Token::CloseBrace => TokenType::CloseBrace,
-            Token::OpenParens => TokenType::OpenParens,
-            Token::CloseParens => TokenType::CloseParens,
-            Token::Comma => TokenType::Comma,
-            Token::Semicolon => TokenType::Semicolon,
-            Token::Str(_) => TokenType::Str,
-            Token::Name(_) => TokenType::Name,
-        }
-    }
 }
 
 /// Represents the type of errors that can occurr while lexing.
@@ -244,6 +199,28 @@ struct FunctionDeclaration {
     body: Vec<Statement>,
 }
 
+/// Represents the root of our syntax tree.
+///
+/// A program in Poline is just a list of function declarations.
+struct Syntax {
+    /// The sequence of functions that make up our program.
+    functions: Vec<FunctionDeclaration>,
+}
+
+/// Represents an error occurring during parsing.
+///
+/// At the moment the parse errors aren't particularly expressive.
+enum ParseError {
+    /// The parser failed for some reason, described in the string.
+    Failed(String),
+}
+
+type ParseResult<T> = Result<T, ParseError>;
+
+fn parse_fail<T, S: Into<String>>(s: S) -> ParseResult<T> {
+    Err(ParseError::Failed(s.into()))
+}
+
 /// This holds the information and state necessary to parse items.
 struct Parser {
     /// A sequence of tokens composing the program we want to compile.
@@ -272,21 +249,79 @@ impl Parser {
         self.previous()
     }
 
-    fn check(&self, typ: TokenType) -> bool {
+    fn check(&self, token: &Token) -> bool {
+        self.peek() == Some(token)
+    }
+
+    fn expect(&self, token: &Token) -> ParseResult<()> {
         match self.peek() {
-            Some(token) if token.typ() == typ => true,
-            _ => false,
+            Some(right) if right == token => Ok(()),
+            Some(wrong) => parse_fail(format!("Expected {:?} got {:?}", token, wrong)),
+            None => parse_fail("Insufficient input"),
         }
     }
 
-    fn any(&mut self, types: &[TokenType]) -> bool {
+    fn extract<R, F>(&self, matcher: F) -> ParseResult<R>
+    where
+        F: Fn(&Token) -> Option<R>,
+    {
+        if let Some(p) = self.peek() {
+            if let Some(r) = matcher(p) {
+                Ok(r)
+            } else {
+                parse_fail(format!("Unexpected {:?}", p))
+            }
+        } else {
+            parse_fail("Insufficient input")
+        }
+    }
+
+    fn any(&mut self, types: &[Token]) -> bool {
         for typ in types {
-            if self.check(*typ) {
+            if self.check(typ) {
                 self.advance();
                 return true;
             }
         }
         false
+    }
+
+    fn name(&mut self) -> ParseResult<String> {
+        if let Some(Token::Name(s)) = self.peek() {
+            let mine = s.to_owned();
+            self.advance();
+            Ok(mine)
+        } else {
+            parse_fail("Expected name token")
+        }
+    }
+
+    fn arg_names(&mut self) -> ParseResult<Vec<String>> {
+        self.expect(&Token::OpenParens)?;
+        let mut args = Vec::new();
+        if let Some(Token::Name(s)) = self.peek() {
+            let mine = s.to_owned();
+            self.advance();
+            args.push(mine);
+            while self.check(&Token::Comma) {
+                let s = self.extract(|x| match x {
+                    Token::Name(s) => Some(s.to_owned()),
+                    _ => None,
+                })?;
+                args.push(s);
+            }
+        }
+        self.expect(&Token::CloseParens)?;
+        Ok(args)
+    }
+
+    fn function_decl(&mut self) -> ParseResult<FunctionDeclaration> {
+        if !self.check(&Token::Function) {
+            return parse_fail("Expeted function declaration");
+        }
+        let name = self.name()?;
+        let arg_names = self.arg_names()?;
+        unimplemented!()
     }
 }
 
