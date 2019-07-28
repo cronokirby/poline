@@ -161,7 +161,7 @@ enum Argument {
     /// A variable name.
     Name(String),
     /// A String litteral.
-    Litteral(String),
+    Str(String),
 }
 
 /// Represents a function call synactically.
@@ -253,20 +253,24 @@ impl Parser {
         self.peek() == Some(token)
     }
 
-    fn expect(&self, token: &Token) -> ParseResult<()> {
+    fn expect(&mut self, token: &Token) -> ParseResult<()> {
         match self.peek() {
-            Some(right) if right == token => Ok(()),
+            Some(right) if right == token => {
+                self.advance();
+                Ok(())
+            }
             Some(wrong) => parse_fail(format!("Expected {:?} got {:?}", token, wrong)),
             None => parse_fail("Insufficient input"),
         }
     }
 
-    fn extract<R, F>(&self, matcher: F) -> ParseResult<R>
+    fn extract<R, F>(&mut self, matcher: F) -> ParseResult<R>
     where
         F: Fn(&Token) -> Option<R>,
     {
         if let Some(p) = self.peek() {
             if let Some(r) = matcher(p) {
+                self.advance();
                 Ok(r)
             } else {
                 parse_fail(format!("Unexpected {:?}", p))
@@ -286,14 +290,15 @@ impl Parser {
         false
     }
 
+    fn semicolon(&mut self) -> ParseResult<()> {
+        self.expect(&Token::Semicolon)
+    }
+
     fn name(&mut self) -> ParseResult<String> {
-        if let Some(Token::Name(s)) = self.peek() {
-            let mine = s.to_owned();
-            self.advance();
-            Ok(mine)
-        } else {
-            parse_fail("Expected name token")
-        }
+        self.extract(|x| match x {
+            Token::Name(s) => Some(s.to_owned()),
+            _ => None,
+        })
     }
 
     fn arg_names(&mut self) -> ParseResult<Vec<String>> {
@@ -304,15 +309,82 @@ impl Parser {
             self.advance();
             args.push(mine);
             while self.check(&Token::Comma) {
-                let s = self.extract(|x| match x {
-                    Token::Name(s) => Some(s.to_owned()),
-                    _ => None,
-                })?;
-                args.push(s);
+                self.advance();
+                args.push(self.name()?);
             }
         }
         self.expect(&Token::CloseParens)?;
         Ok(args)
+    }
+
+    fn argument(&mut self) -> ParseResult<Argument> {
+        self.extract(|x| match x {
+            Token::Name(s) => Some(Argument::Name(s.to_owned())),
+            Token::Str(s) => Some(Argument::Str(s.to_owned())),
+            _ => None,
+        })
+    }
+
+    fn arguments(&mut self) -> ParseResult<Vec<Argument>> {
+        self.expect(&Token::OpenParens)?;
+        let mut args = Vec::new();
+        let first_argument = match self.peek() {
+            Some(Token::Name(s)) => Some(Argument::Name(s.to_owned())),
+            Some(Token::Str(s)) => Some(Argument::Str(s.to_owned())),
+            _ => None,
+        };
+        if let Some(arg) = first_argument {
+            args.push(arg);
+            while self.check(&Token::Comma) {
+                self.advance();
+                args.push(self.argument()?);
+            }
+        }
+        self.expect(&Token::CloseParens)?;
+        Ok(args)
+    }
+
+    fn function_call(&mut self) -> ParseResult<FunctionCall> {
+        let name = self.name()?;
+        let args = self.arguments()?;
+        Ok(FunctionCall { name, args })
+    }
+
+    fn statement(&mut self) -> ParseResult<Option<Statement>> {
+        if self.check(&Token::Print) {
+            self.advance();
+            let arg = self.argument()?;
+            self.semicolon()?;
+            Ok(Some(Statement::Print(arg)))
+        } else if self.check(&Token::Recv) {
+            self.advance();
+            let name = self.name()?;
+            self.semicolon()?;
+            Ok(Some(Statement::Recv(name)))
+        } else if self.check(&Token::Spawn) {
+            self.advance();
+            let call = self.function_call()?;
+            self.expect(&Token::As)?;
+            let name = self.name()?;
+            self.semicolon()?;
+            Ok(Some(Statement::Spawn(call, name)))
+        } else if self.check(&Token::Send) {
+            self.advance();
+            let arg = self.argument()?;
+            self.expect(&Token::To)?;
+            let name = self.name()?;
+            self.semicolon()?;
+            Ok(Some(Statement::Send(arg, name)))
+        } else if let Some(Token::Name(s)) = self.peek() {
+            let name = s.to_owned();
+            self.advance();
+            let args = self.arguments()?;
+            self.semicolon()?;
+            let call = FunctionCall { name, args };
+            Ok(Some(Statement::Call(call)))
+        } else {
+            Ok(None)
+        }
     }
 
     fn function_decl(&mut self) -> ParseResult<FunctionDeclaration> {
@@ -321,7 +393,15 @@ impl Parser {
         }
         let name = self.name()?;
         let arg_names = self.arg_names()?;
-        unimplemented!()
+        let mut body = Vec::new();
+        while let Some(statement) = self.statement()? {
+            body.push(statement);
+        }
+        Ok(FunctionDeclaration {
+            name,
+            arg_names,
+            body,
+        })
     }
 }
 
