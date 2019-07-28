@@ -122,16 +122,6 @@ impl<'a> Iterator for Lexer<'a> {
                 '(' => return Some(Ok(Token::OpenParens)),
                 ')' => return Some(Ok(Token::CloseParens)),
                 ',' => return Some(Ok(Token::Comma)),
-                't' => {
-                    if self.same('o') {
-                        return Some(Ok(Token::To));
-                    }
-                }
-                'a' => {
-                    if self.same('s') {
-                        return Some(Ok(Token::As));
-                    }
-                }
                 '"' => return Some(self.string().map(Token::Str)),
                 c if c.is_alphabetic() => {
                     let ident = self.identifier(c);
@@ -293,16 +283,6 @@ impl Parser {
         }
     }
 
-    fn any(&mut self, types: &[Token]) -> bool {
-        for typ in types {
-            if self.check(typ) {
-                self.advance();
-                return true;
-            }
-        }
-        false
-    }
-
     fn semicolon(&mut self) -> ParseResult<()> {
         self.expect(&Token::Semicolon)
     }
@@ -317,6 +297,7 @@ impl Parser {
     fn arg_names(&mut self) -> ParseResult<Vec<String>> {
         self.expect(&Token::OpenParens)?;
         let mut args = Vec::new();
+        dbg!(self.peek());
         if let Some(Token::Name(s)) = self.peek() {
             let mine = s.to_owned();
             self.advance();
@@ -402,14 +383,17 @@ impl Parser {
 
     fn function_decl(&mut self) -> ParseResult<FunctionDeclaration> {
         if !self.check(&Token::Function) {
-            return parse_fail("Expeted function declaration");
+            return parse_fail("Expected function declaration");
         }
+        self.advance();
         let name = self.name()?;
         let arg_names = self.arg_names()?;
+        self.expect(&Token::OpenBrace)?;
         let mut body = Vec::new();
         while let Some(statement) = self.statement()? {
             body.push(statement);
         }
+        self.expect(&Token::CloseBrace)?;
         Ok(FunctionDeclaration {
             name,
             arg_names,
@@ -446,6 +430,7 @@ fn main() -> io::Result<()> {
         println!("Lexing errors: {:?}", &errors);
         return Ok(())
     }
+    println!("Tokens: {:?}", &tokens);
     println!("Lexing ok!");
     let mut parser = Parser::new(tokens);
     let result = parser.syntax();
@@ -473,7 +458,7 @@ mod test {
 
     #[test]
     fn lexer_works_for_to_and_as() {
-        let text = "toas";
+        let text = "to as";
         let tokens: Vec<LexResult> = Lexer::new(text).collect();
         let expected = vec![Ok(Token::To), Ok(Token::As)];
         assert_eq!(tokens, expected);
@@ -526,6 +511,21 @@ mod test {
             Ok(Token::Spawn),
             Ok(Token::As),
             Ok(Token::Name(String::from("variable"))),
+        ];
+        assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn lexer_works_on_multiple_arg_names() {
+        let text = "both(a, b)";
+        let tokens: Vec<LexResult> = Lexer::new(text).collect();
+        let expected = vec![
+            Ok(Token::Name(String::from("both"))),
+            Ok(Token::OpenParens),
+            Ok(Token::Name(String::from("a"))),
+            Ok(Token::Comma),
+            Ok(Token::Name(String::from("b"))),
+            Ok(Token::CloseParens)
         ];
         assert_eq!(tokens, expected);
     }
