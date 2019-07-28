@@ -92,6 +92,19 @@ impl<'a> Lexer<'a> {
             Err(LexError::UnterminatedString)
         }
     }
+
+    fn identifier(&mut self, starter: char) -> String {
+        let mut acc = String::new();
+        acc.push(starter);
+        while let Some(c) = self.chars.peek() {
+            if !c.is_alphanumeric() {
+                break;
+            }
+            // This is safe since we peeked
+            acc.push(self.chars.next().unwrap());
+        }
+        acc
+    }
 }
 
 impl<'a> Iterator for Lexer<'a> {
@@ -117,6 +130,20 @@ impl<'a> Iterator for Lexer<'a> {
                     }
                 }
                 '"' => return Some(self.string().map(Token::Str)),
+                c if c.is_alphabetic() => {
+                    let ident = self.identifier(c);
+                    let out = match ident.as_ref() {
+                        "fn" => Token::Function,
+                        "recv" => Token::Recv,
+                        "send" => Token::Send,
+                        "to" => Token::To,
+                        "spawn" => Token::Spawn,
+                        "as" => Token::As,
+                        "print" => Token::Print,
+                        _ => Token::Name(ident),
+                    };
+                    return Some(Ok(out));
+                }
                 // Simply ignore whitespace between tokens
                 w if w.is_whitespace() => {}
                 _ => return Some(Err(LexError::Failed)),
@@ -186,6 +213,23 @@ mod test {
             Ok(Token::OpenParens),
             Ok(Token::Comma),
             Ok(Token::CloseParens),
+        ];
+        assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn lexer_works_on_identifiers_and_keywords() {
+        let text = "fn print recv send to spawn as variable";
+        let tokens: Vec<LexResult> = Lexer::new(text).collect();
+        let expected = vec![
+            Ok(Token::Function),
+            Ok(Token::Print),
+            Ok(Token::Recv),
+            Ok(Token::Send),
+            Ok(Token::To),
+            Ok(Token::Spawn),
+            Ok(Token::As),
+            Ok(Token::Name(String::from("variable")))
         ];
         assert_eq!(tokens, expected);
     }
