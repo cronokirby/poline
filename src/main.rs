@@ -157,6 +157,7 @@ impl<'a> Iterator for Lexer<'a> {
 }
 
 /// Represents a syntactical argument.
+#[derive(Debug)]
 enum Argument {
     /// A variable name.
     Name(String),
@@ -165,6 +166,7 @@ enum Argument {
 }
 
 /// Represents a function call synactically.
+#[derive(Debug)]
 struct FunctionCall {
     /// The name of the function being called.
     name: String,
@@ -173,6 +175,7 @@ struct FunctionCall {
 }
 
 /// A statement is a single operation inside the body of a function.
+#[derive(Debug)]
 enum Statement {
     /// Represents printing an argument out.
     Print(Argument),
@@ -190,6 +193,7 @@ enum Statement {
 ///
 /// A Poline program is composed of a list of function declarations, one
 /// of which is the main function.
+#[derive(Debug)]
 struct FunctionDeclaration {
     /// The name associated with the function.
     name: String,
@@ -202,6 +206,7 @@ struct FunctionDeclaration {
 /// Represents the root of our syntax tree.
 ///
 /// A program in Poline is just a list of function declarations.
+#[derive(Debug)]
 struct Syntax {
     /// The sequence of functions that make up our program.
     functions: Vec<FunctionDeclaration>,
@@ -210,6 +215,7 @@ struct Syntax {
 /// Represents an error occurring during parsing.
 ///
 /// At the moment the parse errors aren't particularly expressive.
+#[derive(Debug)]
 enum ParseError {
     /// The parser failed for some reason, described in the string.
     Failed(String),
@@ -230,6 +236,13 @@ struct Parser {
 }
 
 impl Parser {
+    fn new(tokens: Vec<Token>) -> Self {
+        Parser {
+            tokens,
+            position: 0,
+        }
+    }
+
     fn at_end(&self) -> bool {
         self.position == self.tokens.len()
     }
@@ -403,6 +416,15 @@ impl Parser {
             body,
         })
     }
+
+    fn syntax(&mut self) -> ParseResult<Syntax> {
+        let mut functions = Vec::new();
+        while !self.at_end() {
+            let decl = self.function_decl()?;
+            functions.push(decl);
+        }
+        Ok(Syntax { functions })
+    }
 }
 
 fn main() -> io::Result<()> {
@@ -412,9 +434,22 @@ fn main() -> io::Result<()> {
     let mut file = File::open(file_name)?;
     let mut contents = String::new();
     file.read_to_string(&mut contents)?;
+    let mut tokens = Vec::new();
+    let mut errors = Vec::new();
     for token in Lexer::new(&contents) {
-        println!("{:?}", token);
+        match token {
+            Ok(t) => tokens.push(t),
+            Err(e) => errors.push(e)
+        }
     }
+    if errors.len() > 0 {
+        println!("Lexing errors: {:?}", &errors);
+        return Ok(())
+    }
+    println!("Lexing ok!");
+    let mut parser = Parser::new(tokens);
+    let result = parser.syntax();
+    println!("Result: {:?}", result);
     Ok(())
 }
 
