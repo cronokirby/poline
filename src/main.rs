@@ -1,3 +1,6 @@
+use std::fs::File;
+use std::io;
+use std::io::prelude::*;
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -153,8 +156,17 @@ impl<'a> Iterator for Lexer<'a> {
     }
 }
 
-fn main() {
-    println!("Hello, world!");
+fn main() -> io::Result<()> {
+    let mut args = std::env::args();
+    args.next();
+    let file_name = args.next().unwrap();
+    let mut file = File::open(file_name)?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    for token in Lexer::new(&contents) {
+        println!("{:?}", token);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -229,7 +241,7 @@ mod test {
             Ok(Token::To),
             Ok(Token::Spawn),
             Ok(Token::As),
-            Ok(Token::Name(String::from("variable")))
+            Ok(Token::Name(String::from("variable"))),
         ];
         assert_eq!(tokens, expected);
     }
