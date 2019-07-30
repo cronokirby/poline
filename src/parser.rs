@@ -230,15 +230,15 @@ impl Parser {
         self.position == self.tokens.len()
     }
 
-    fn peek<'a>(&'a self) -> Option<&'a Token> {
+    fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.position)
     }
 
-    fn previous<'a>(&'a self) -> &'a Token {
+    fn previous(&self) -> &Token {
         &self.tokens[self.position - 1]
     }
 
-    fn advance<'a>(&'a mut self) -> &'a Token {
+    fn advance(&mut self) -> &Token {
         if !self.at_end() {
             self.position += 1;
         }
@@ -413,7 +413,7 @@ pub fn collect_errors_and_parse(content: &str) -> ParseResult<Syntax> {
             Err(e) => errors.push(e),
         }
     }
-    if errors.len() > 0 {
+    if !errors.is_empty() {
         return Err(ParseError::FailedToLex(errors));
     }
     let mut parser = Parser::new(tokens);
