@@ -4,6 +4,7 @@ use std::io::prelude::*;
 
 mod parser;
 use parser::collect_errors_and_parse;
+mod simplifier;
 
 fn main() -> io::Result<()> {
     let mut args = std::env::args();

@@ -1,3 +1,8 @@
+//! The parser module converts source code into a typed representation of that Code.
+//!
+//! The representation tries to stay faithful to what was written in that
+//! source code. The main way to interact with this module is through the
+//! `collect_errors_and_parse` function.
 use std::iter::Peekable;
 use std::str::Chars;
 
