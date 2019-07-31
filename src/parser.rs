@@ -134,7 +134,7 @@ impl<'a> Iterator for Lexer<'a> {
 }
 
 /// Represents a syntactical argument.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Argument {
     /// A variable name.
     Name(String),
@@ -143,7 +143,7 @@ pub enum Argument {
 }
 
 /// Represents a function call synactically.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FunctionCall {
     /// The name of the function being called.
     pub name: String,
@@ -152,7 +152,7 @@ pub struct FunctionCall {
 }
 
 /// A statement is a single operation inside the body of a function.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Statement {
     /// Represents printing an argument out.
     Print(Argument),
@@ -170,7 +170,7 @@ pub enum Statement {
 ///
 /// A Poline program is composed of a list of function declarations, one
 /// of which is the main function.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FunctionDeclaration {
     /// The name associated with the function.
     pub name: String,
@@ -183,7 +183,7 @@ pub struct FunctionDeclaration {
 /// Represents the root of our syntax tree.
 ///
 /// A program in Poline is just a list of function declarations.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Syntax {
     /// The sequence of functions that make up our program.
     pub functions: Vec<FunctionDeclaration>,
@@ -192,7 +192,7 @@ pub struct Syntax {
 /// Represents an error occurring during parsing.
 ///
 /// At the moment the parse errors aren't particularly expressive.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ParseError {
     /// The parser failed for some reason, described in the string.
     Failed(String),
@@ -404,6 +404,13 @@ impl Parser {
     }
 }
 
+/// Try and parse a Poline program, failing at the Lexing or Parsing step.
+///
+/// This acts as the main way to consume this module.
+///
+/// In the Lexing step, multiple errors can be emitted, and will be collected
+/// and returned with the `ParseError::FailedToLex` branch. Any error
+/// during Parsing will short circuit, and end the step.
 pub fn collect_errors_and_parse(content: &str) -> ParseResult<Syntax> {
     let mut tokens = Vec::new();
     let mut errors = Vec::new();
@@ -510,5 +517,37 @@ mod test {
             Ok(Token::CloseParens),
         ];
         assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn parser_works_on_example_program() {
+        let program =
+            "fn foo(a, b) { print a; spawn foo(a, b) as p; send \"bar\" to p; recv a; foo(a, b); }";
+        let result = collect_errors_and_parse(program);
+        let body = vec![
+            Statement::Print(Argument::Name("a".into())),
+            Statement::Spawn(
+                FunctionCall {
+                    name: "foo".into(),
+                    args: vec![Argument::Name("a".into()), Argument::Name("b".into())],
+                },
+                "p".into(),
+            ),
+            Statement::Send(Argument::Str("bar".into()), "p".into()),
+            Statement::Recv("a".into()),
+            Statement::Call(FunctionCall {
+                name: "foo".into(),
+                args: vec![Argument::Name("a".into()), Argument::Name("b".into())],
+            }),
+        ];
+        let foo_func = FunctionDeclaration {
+            name: "foo".into(),
+            arg_names: vec!["a".into(), "b".into()],
+            body,
+        };
+        let expected = Syntax {
+            functions: vec![foo_func],
+        };
+        assert_eq!(result, Ok(expected));
     }
 }
