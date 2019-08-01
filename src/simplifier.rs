@@ -4,6 +4,9 @@
 //! of our source code into a form more amenable to interpretation. This mainly
 //! involves extracting out string litterals and changing variables to use
 //! an index form instead of relying on string litterals.
+use crate::parser;
+use std::collections::HashMap;
+use std::iter::*;
 
 /// Represents a De Bruijin-esque index, instead of a variable name.
 ///
@@ -109,4 +112,42 @@ struct FunctionDeclaration {
     arg_count: u32,
     /// A sequence of statements making up the function.
     body: Vec<Statement>,
+}
+
+/// Represents a simplified Poline program.
+#[derive(Clone, Debug, PartialEq)]
+struct Program {
+    /// The top level function declarations making up the program.
+    ///
+    /// The function called "main" is the entry point of the program.
+    functions: Vec<FunctionDeclaration>,
+}
+
+fn simplify_statement(statement: parser::Statement) -> Statement {
+    unimplemented!()
+}
+
+fn simplify(syntax: parser::Syntax) -> Program {
+    // We start at 1, since we want to give 0 to the function named "main"
+    let mut function_index = 1;
+    let mut name_to_index = HashMap::new();
+    let mut functions = Vec::new();
+    for function in syntax.functions {
+        let name = if function.name == "main" {
+            StackIndex(0)
+        } else {
+            let index = function_index;
+            function_index += 1;
+            StackIndex(index)
+        };
+        name_to_index.insert(function.name, name);
+        let arg_count = function.arg_names.len() as u32;
+        let body = function.body.into_iter().map(simplify_statement).collect();
+        functions.push(FunctionDeclaration {
+            name,
+            arg_count,
+            body,
+        });
+    }
+    unimplemented!()
 }
