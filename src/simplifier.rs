@@ -114,17 +114,91 @@ struct FunctionDeclaration {
     body: Vec<Statement>,
 }
 
+/// Represents the table of string litterals in our program.
+/// 
+/// We store all of the string litterals in the program in a single table,
+/// to make the representation of the program a bit simpler.
+struct StringTable(Vec<String>);
+
+impl StringTable {
+    fn new() -> Self {
+        StringTable(Vec::new())
+    }
+
+    /// We take ownership of the String because we need
+    /// to store the data permanently.
+    fn insert(&mut self, s: String) -> StringIndex {
+        self.0.push(s);
+        StringIndex((self.0.len() - 1) as u32)
+    }
+
+    /// Get the string data corresponding to a given index.
+    pub fn get(&self, index: StringIndex) -> &str {
+        &self.0[index.0 as usize]
+    }
+}
+
+
 /// Represents a simplified Poline program.
 #[derive(Clone, Debug, PartialEq)]
 struct Program {
+    /// The string table holds the string litterals in the program.
+    string_table: HashMap<String, StringIndex>,
     /// The top level function declarations making up the program.
     ///
     /// The function called "main" is the entry point of the program.
     functions: Vec<FunctionDeclaration>,
 }
 
-fn simplify_statement(statement: parser::Statement) -> Statement {
-    unimplemented!()
+/// This is the context used when generating new statements.
+/// 
+/// The context allows us to map variable names to a stack index.
+struct NameContext {
+    names: HashMap<String, u32>,
+    index: u32
+}
+
+impl NameContext {
+    fn new() -> Self {
+        NameContext { names: HashMap::new(), index: 0 }
+    }
+
+    fn replace(&mut self, s: String) -> StackIndex {
+        match self.names.get(&s) {
+            None => {
+                self.names.insert(s, self.index);
+                let mapped = StackIndex(self.index);
+                self.index += 1;
+                mapped
+            }
+            Some(index) => StackIndex(*index)
+        }
+    }
+}
+
+/// Represents the context we need to carry around when simplifying.
+/// 
+/// This context carries things like the data surrounding name generation,
+/// as well as holding the future string litteral table.
+struct Context {
+
+}
+
+fn simplify_arg(ctx: &mut NameContext, argument: parser::Argument) -> Argument {
+    match argument {
+        parser::Argument::Str(s) => Argument::Str(s),
+        parser::Argument::Name(s) => 
+    }
+}
+
+fn simplify_statements(statements: &[parser::Statement]) -> Vec<Statement> {
+    let name_to_index = HashMap::new();
+    let mut index = 0;
+    statements.iter().map(|&statement| {
+        match statement {
+            parser::Statement::Print()
+        }
+    }).collect()
 }
 
 fn simplify(syntax: parser::Syntax) -> Program {
@@ -142,7 +216,7 @@ fn simplify(syntax: parser::Syntax) -> Program {
         };
         name_to_index.insert(function.name, name);
         let arg_count = function.arg_names.len() as u32;
-        let body = function.body.into_iter().map(simplify_statement).collect();
+        let body = simplify_statements(&function.body);
         functions.push(FunctionDeclaration {
             name,
             arg_count,
