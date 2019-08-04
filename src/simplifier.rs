@@ -60,7 +60,9 @@ struct StringIndex(u32);
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Argument {
     /// Represents a reference to a named variable.
-    Name(StackIndex),
+    ///
+    /// This may be missing because we're referencing a non existent variable.
+    Name(Option<StackIndex>),
     /// Represents a string litteral.
     Str(StringIndex),
 }
@@ -90,7 +92,9 @@ enum Statement {
     /// Represents spawning a function into a new thread.
     Spawn(FunctionCall),
     /// Send a given argument to a process, referenced by stack index.
-    Send(Argument, StackIndex),
+    ///
+    /// The program may have tried to send a variable that doesn't exist.
+    Send(Argument, Option<StackIndex>),
     /// Call a given function.
     Call(FunctionCall),
 }
@@ -115,7 +119,7 @@ struct FunctionDeclaration {
 }
 
 /// Represents the table of string litterals in our program.
-/// 
+///
 /// We store all of the string litterals in the program in a single table,
 /// to make the representation of the program a bit simpler.
 struct StringTable(Vec<String>);
@@ -138,6 +142,92 @@ impl StringTable {
     }
 }
 
+/// This is the context used when generating new statements.
+///
+/// The context allows us to map variable names to a stack index.
+struct NameContext {
+    names: HashMap<String, u32>,
+    index: u32,
+}
+
+impl NameContext {
+    fn new() -> Self {
+        NameContext {
+            names: HashMap::new(),
+            index: 0,
+        }
+    }
+
+    // Replace a given name with its stack index.
+    fn replace(&mut self, s: String) -> Option<StackIndex> {
+        self.names.get(&s).map(|&index| StackIndex(index))
+    }
+
+    // Introduce a new variable into the context
+    fn introduce(&mut self, s: String) {
+        self.names.insert(s, self.index);
+        self.index += 1;
+    }
+}
+
+struct FunctionNames {
+    name_to_index: HashMap<String, StackIndex>,
+    index: u32,
+}
+
+impl FunctionNames {
+    fn new() -> Self {
+        // We start at 1 because "0" is reserved for the main function.
+        FunctionNames {
+            name_to_index: HashMap::new(),
+            index: 1,
+        }
+    }
+
+    fn new_name(&mut self, name: String) -> StackIndex {
+        if &name == "main" {
+            StackIndex(0)
+        } else {
+            match self.name_to_index.get(&name) {
+                Some(index) => *index,
+                None => {
+                    let inserted = StackIndex(self.index);
+                    self.name_to_index.insert(name, inserted);
+                    self.index += 1;
+                    inserted
+                }
+            }
+        }
+    }
+}
+
+/// Represents the context we need to carry around when simplifying.
+///
+/// This context carries things like the data surrounding name generation,
+/// as well as holding the future string litteral table.
+struct Context {
+    strings: StringTable,
+    names: NameContext,
+    functions: FunctionNames,
+}
+
+impl Context {
+    fn new() -> Self {
+        Context {
+            strings: StringTable::new(),
+            names: NameContext::new(),
+            functions: FunctionNames::new(),
+        }
+    }
+
+    // Clear the name context.
+    //
+    // This should be used when moving to a new function, where we need to start
+    // our variable naming over again.
+    fn reset_names(&mut self) {
+        self.names = NameContext::new();
+    }
+}
 
 /// Represents a simplified Poline program.
 #[derive(Clone, Debug, PartialEq)]
@@ -150,73 +240,34 @@ struct Program {
     functions: Vec<FunctionDeclaration>,
 }
 
-/// This is the context used when generating new statements.
-/// 
-/// The context allows us to map variable names to a stack index.
-struct NameContext {
-    names: HashMap<String, u32>,
-    index: u32
-}
-
-impl NameContext {
-    fn new() -> Self {
-        NameContext { names: HashMap::new(), index: 0 }
-    }
-
-    fn replace(&mut self, s: String) -> StackIndex {
-        match self.names.get(&s) {
-            None => {
-                self.names.insert(s, self.index);
-                let mapped = StackIndex(self.index);
-                self.index += 1;
-                mapped
-            }
-            Some(index) => StackIndex(*index)
-        }
-    }
-}
-
-/// Represents the context we need to carry around when simplifying.
-/// 
-/// This context carries things like the data surrounding name generation,
-/// as well as holding the future string litteral table.
-struct Context {
-
-}
-
-fn simplify_arg(ctx: &mut NameContext, argument: parser::Argument) -> Argument {
+fn simplify_arg(ctx: &mut Context, argument: parser::Argument) -> Argument {
     match argument {
-        parser::Argument::Str(s) => Argument::Str(s),
-        parser::Argument::Name(s) => 
+        parser::Argument::Str(s) => Argument::Str(ctx.strings.insert(s)),
+        parser::Argument::Name(s) => Argument::Name(ctx.names.replace(s)),
     }
 }
 
-fn simplify_statements(statements: &[parser::Statement]) -> Vec<Statement> {
-    let name_to_index = HashMap::new();
-    let mut index = 0;
-    statements.iter().map(|&statement| {
-        match statement {
-            parser::Statement::Print()
-        }
-    }).collect()
+fn simplify_statements(ctx: &mut Context, statements: Vec<parser::Statement>) -> Vec<Statement> {
+    statements
+        .into_iter()
+        .map(|statement| match statement {
+            parser::Statement::Print(arg) => Statement::Print(simplify_arg(ctx, arg)),
+            _ => unimplemented!(),
+        })
+        .collect()
 }
 
 fn simplify(syntax: parser::Syntax) -> Program {
-    // We start at 1, since we want to give 0 to the function named "main"
-    let mut function_index = 1;
-    let mut name_to_index = HashMap::new();
+    let mut ctx = Context::new();
     let mut functions = Vec::new();
     for function in syntax.functions {
-        let name = if function.name == "main" {
-            StackIndex(0)
-        } else {
-            let index = function_index;
-            function_index += 1;
-            StackIndex(index)
-        };
-        name_to_index.insert(function.name, name);
+        let name = ctx.functions.new_name(function.name);
         let arg_count = function.arg_names.len() as u32;
-        let body = simplify_statements(&function.body);
+        ctx.reset_names();
+        for arg_name in function.arg_names {
+            ctx.names.introduce(arg_name);
+        }
+        let body = simplify_statements(&mut ctx, function.body);
         functions.push(FunctionDeclaration {
             name,
             arg_count,
