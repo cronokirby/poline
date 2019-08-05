@@ -236,6 +236,10 @@ struct Program {
     functions: Vec<FunctionDeclaration>,
 }
 
+fn transform_vec<A, B, F: FnMut(A) -> B>(vec: Vec<A>, f: F) -> Vec<B> {
+    vec.into_iter().map(f).collect()
+}
+
 fn simplify_arg(ctx: &mut Context, argument: parser::Argument) -> Argument {
     match argument {
         parser::Argument::Str(s) => Argument::Str(ctx.strings.insert(s)),
@@ -245,11 +249,7 @@ fn simplify_arg(ctx: &mut Context, argument: parser::Argument) -> Argument {
 
 fn simplify_function_call(ctx: &mut Context, function: parser::FunctionCall) -> FunctionCall {
     let name = ctx.functions.replace(&function.name);
-    let args = function
-        .args
-        .into_iter()
-        .map(|arg| simplify_arg(ctx, arg))
-        .collect();
+    let args = transform_vec(function.args, |arg| simplify_arg(ctx, arg));
     FunctionCall { name, args }
 }
 
@@ -279,21 +279,13 @@ fn simplify_fn(ctx: &mut Context, function: parser::FunctionDeclaration) -> Func
     for arg_name in function.arg_names {
         ctx.names.introduce(arg_name);
     }
-    let body = function
-        .body
-        .into_iter()
-        .map(|stmt| simplify_statement(ctx, stmt))
-        .collect();
+    let body = transform_vec(function.body, |stmt| simplify_statement(ctx, stmt));
     FunctionDeclaration { arg_count, body }
 }
 
 fn simplify(syntax: parser::Syntax) -> Program {
     let mut ctx = Context::new();
-    let functions = syntax
-        .functions
-        .into_iter()
-        .map(|function| simplify_fn(&mut ctx, function))
-        .collect();
+    let functions = transform_vec(syntax.functions, |func| simplify_fn(&mut ctx, func));
     Program {
         string_table: ctx.strings,
         functions,
