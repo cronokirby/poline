@@ -74,7 +74,7 @@ enum Argument {
 #[derive(Clone, Debug, PartialEq)]
 struct FunctionCall {
     /// The index giving us the name, and thus code, for the function.
-    name: StackIndex,
+    name: Option<StackIndex>,
     /// The arguments being passed to the function.
     args: Vec<Argument>,
 }
@@ -104,12 +104,6 @@ enum Statement {
 /// This information is sufficient to be able to call the given function.
 #[derive(Clone, Debug, PartialEq)]
 struct FunctionDeclaration {
-    /// Represents the name of the function.
-    ///
-    /// Functions use a stack index, where index N represents the Nth function
-    /// declared. This is a consequence of all function declarations being
-    /// on the top level of a Poline program.
-    name: StackIndex,
     /// The number of arguments a function takes.
     ///
     /// At this stage, the names of the variables have been eliminated.
@@ -122,6 +116,7 @@ struct FunctionDeclaration {
 ///
 /// We store all of the string litterals in the program in a single table,
 /// to make the representation of the program a bit simpler.
+#[derive(Clone, Debug, PartialEq)]
 struct StringTable(Vec<String>);
 
 impl StringTable {
@@ -173,30 +168,31 @@ impl NameContext {
 struct FunctionNames {
     name_to_index: HashMap<String, StackIndex>,
     index: u32,
+    main_index: Option<StackIndex>,
 }
 
 impl FunctionNames {
     fn new() -> Self {
-        // We start at 1 because "0" is reserved for the main function.
         FunctionNames {
             name_to_index: HashMap::new(),
-            index: 1,
+            index: 0,
+            main_index: None,
         }
     }
 
-    fn new_name(&mut self, name: String) -> StackIndex {
-        if &name == "main" {
-            StackIndex(0)
-        } else {
-            match self.name_to_index.get(&name) {
-                Some(index) => *index,
-                None => {
-                    let inserted = StackIndex(self.index);
-                    self.name_to_index.insert(name, inserted);
-                    self.index += 1;
-                    inserted
-                }
+    fn replace(&self, name: &str) -> Option<StackIndex> {
+        self.name_to_index.get(name).map(|&index| index)
+    }
+
+    fn new_name(&mut self, name: String) {
+        if !self.name_to_index.contains_key(&name) {
+            let was_main = &name == "main";
+            let new_index = StackIndex(self.index);
+            self.name_to_index.insert(name, new_index);
+            if was_main {
+                self.main_index = Some(new_index);
             }
+            self.index += 1;
         }
     }
 }
@@ -233,7 +229,7 @@ impl Context {
 #[derive(Clone, Debug, PartialEq)]
 struct Program {
     /// The string table holds the string litterals in the program.
-    string_table: HashMap<String, StringIndex>,
+    string_table: StringTable,
     /// The top level function declarations making up the program.
     ///
     /// The function called "main" is the entry point of the program.
@@ -247,32 +243,59 @@ fn simplify_arg(ctx: &mut Context, argument: parser::Argument) -> Argument {
     }
 }
 
-fn simplify_statements(ctx: &mut Context, statements: Vec<parser::Statement>) -> Vec<Statement> {
-    statements
+fn simplify_function_call(ctx: &mut Context, function: parser::FunctionCall) -> FunctionCall {
+    let name = ctx.functions.replace(&function.name);
+    let args = function
+        .args
         .into_iter()
-        .map(|statement| match statement {
-            parser::Statement::Print(arg) => Statement::Print(simplify_arg(ctx, arg)),
-            _ => unimplemented!(),
-        })
-        .collect()
+        .map(|arg| simplify_arg(ctx, arg))
+        .collect();
+    FunctionCall { name, args }
+}
+
+fn simplify_statement(ctx: &mut Context, statement: parser::Statement) -> Statement {
+    match statement {
+        parser::Statement::Print(arg) => Statement::Print(simplify_arg(ctx, arg)),
+        parser::Statement::Recv(new) => {
+            ctx.names.introduce(new);
+            Statement::Recv
+        }
+        parser::Statement::Send(arg, process) => {
+            let process_name = ctx.names.replace(process);
+            Statement::Send(simplify_arg(ctx, arg), process_name)
+        }
+        parser::Statement::Call(function) => Statement::Call(simplify_function_call(ctx, function)),
+        parser::Statement::Spawn(function, new) => {
+            ctx.names.introduce(new);
+            Statement::Spawn(simplify_function_call(ctx, function))
+        }
+    }
+}
+
+fn simplify_fn(ctx: &mut Context, function: parser::FunctionDeclaration) -> FunctionDeclaration {
+    ctx.functions.new_name(function.name);
+    let arg_count = function.arg_names.len() as u32;
+    ctx.reset_names();
+    for arg_name in function.arg_names {
+        ctx.names.introduce(arg_name);
+    }
+    let body = function
+        .body
+        .into_iter()
+        .map(|stmt| simplify_statement(ctx, stmt))
+        .collect();
+    FunctionDeclaration { arg_count, body }
 }
 
 fn simplify(syntax: parser::Syntax) -> Program {
     let mut ctx = Context::new();
-    let mut functions = Vec::new();
-    for function in syntax.functions {
-        let name = ctx.functions.new_name(function.name);
-        let arg_count = function.arg_names.len() as u32;
-        ctx.reset_names();
-        for arg_name in function.arg_names {
-            ctx.names.introduce(arg_name);
-        }
-        let body = simplify_statements(&mut ctx, function.body);
-        functions.push(FunctionDeclaration {
-            name,
-            arg_count,
-            body,
-        });
+    let functions = syntax
+        .functions
+        .into_iter()
+        .map(|function| simplify_fn(&mut ctx, function))
+        .collect();
+    Program {
+        string_table: ctx.strings,
+        functions,
     }
-    unimplemented!()
 }
