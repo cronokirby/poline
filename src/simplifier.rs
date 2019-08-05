@@ -60,9 +60,7 @@ struct StringIndex(u32);
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Argument {
     /// Represents a reference to a named variable.
-    ///
-    /// This may be missing because we're referencing a non existent variable.
-    Name(Option<StackIndex>),
+    Name(StackIndex),
     /// Represents a string litteral.
     Str(StringIndex),
 }
@@ -74,7 +72,7 @@ enum Argument {
 #[derive(Clone, Debug, PartialEq)]
 struct FunctionCall {
     /// The index giving us the name, and thus code, for the function.
-    name: Option<StackIndex>,
+    name: StackIndex,
     /// The arguments being passed to the function.
     args: Vec<Argument>,
 }
@@ -92,9 +90,7 @@ enum Statement {
     /// Represents spawning a function into a new thread.
     Spawn(FunctionCall),
     /// Send a given argument to a process, referenced by stack index.
-    ///
-    /// The program may have tried to send a variable that doesn't exist.
-    Send(Argument, Option<StackIndex>),
+    Send(Argument, StackIndex),
     /// Call a given function.
     Call(FunctionCall),
 }
@@ -154,8 +150,11 @@ impl NameContext {
     }
 
     // Replace a given name with its stack index.
-    fn replace(&mut self, s: String) -> Option<StackIndex> {
-        self.names.get(&s).map(|&index| StackIndex(index))
+    fn lookup(&mut self, name: String) -> SimplifyResult<StackIndex> {
+        match self.names.get(&name) {
+            Some(&index) => Ok(StackIndex(index)),
+            None => undefined_name(name),
+        }
     }
 
     // Introduce a new variable into the context
@@ -180,8 +179,11 @@ impl FunctionNames {
         }
     }
 
-    fn replace(&self, name: &str) -> Option<StackIndex> {
-        self.name_to_index.get(name).map(|&index| index)
+    fn replace(&self, name: String) -> SimplifyResult<StackIndex> {
+        match self.name_to_index.get(&name) {
+            Some(&index) => Ok(index),
+            None => undefined_name(name),
+        }
     }
 
     fn new_name(&mut self, name: String) {
@@ -236,58 +238,90 @@ struct Program {
     functions: Vec<FunctionDeclaration>,
 }
 
-fn transform_vec<A, B, F: FnMut(A) -> B>(vec: Vec<A>, f: F) -> Vec<B> {
-    vec.into_iter().map(f).collect()
+#[derive(Clone, Debug, PartialEq)]
+enum SimplifyError {
+    /// The program references a name that hasn't been defined
+    UndefinedName(String),
 }
 
-fn simplify_arg(ctx: &mut Context, argument: parser::Argument) -> Argument {
+type SimplifyResult<T> = Result<T, SimplifyError>;
+
+fn undefined_name<T>(name: String) -> SimplifyResult<T> {
+    Err(SimplifyError::UndefinedName(name))
+}
+
+fn simplify_vec<A, B, F>(vec: Vec<A>, mut f: F) -> SimplifyResult<Vec<B>>
+where
+    F: FnMut(A) -> SimplifyResult<B>,
+{
+    let f = &mut f;
+    let mut acc = Vec::new();
+    for item in vec {
+        acc.push(f(item)?);
+    }
+    Ok(acc)
+}
+
+fn simplify_arg(ctx: &mut Context, argument: parser::Argument) -> SimplifyResult<Argument> {
     match argument {
-        parser::Argument::Str(s) => Argument::Str(ctx.strings.insert(s)),
-        parser::Argument::Name(s) => Argument::Name(ctx.names.replace(s)),
+        parser::Argument::Str(s) => Ok(Argument::Str(ctx.strings.insert(s))),
+        parser::Argument::Name(s) => ctx.names.lookup(s).map(Argument::Name),
     }
 }
 
-fn simplify_function_call(ctx: &mut Context, function: parser::FunctionCall) -> FunctionCall {
-    let name = ctx.functions.replace(&function.name);
-    let args = transform_vec(function.args, |arg| simplify_arg(ctx, arg));
-    FunctionCall { name, args }
+fn simplify_function_call(
+    ctx: &mut Context,
+    function: parser::FunctionCall,
+) -> SimplifyResult<FunctionCall> {
+    let name = ctx.functions.replace(function.name)?;
+    let args = simplify_vec(function.args, |arg| simplify_arg(ctx, arg))?;
+    Ok(FunctionCall { name, args })
 }
 
-fn simplify_statement(ctx: &mut Context, statement: parser::Statement) -> Statement {
+fn simplify_statement(
+    ctx: &mut Context,
+    statement: parser::Statement,
+) -> SimplifyResult<Statement> {
     match statement {
-        parser::Statement::Print(arg) => Statement::Print(simplify_arg(ctx, arg)),
+        parser::Statement::Print(arg) => simplify_arg(ctx, arg).map(Statement::Print),
         parser::Statement::Recv(new) => {
             ctx.names.introduce(new);
-            Statement::Recv
+            Ok(Statement::Recv)
         }
         parser::Statement::Send(arg, process) => {
-            let process_name = ctx.names.replace(process);
-            Statement::Send(simplify_arg(ctx, arg), process_name)
+            let process_name = ctx.names.lookup(process)?;
+            let arg = simplify_arg(ctx, arg)?;
+            Ok(Statement::Send(arg, process_name))
         }
-        parser::Statement::Call(function) => Statement::Call(simplify_function_call(ctx, function)),
+        parser::Statement::Call(function) => {
+            simplify_function_call(ctx, function).map(Statement::Call)
+        }
         parser::Statement::Spawn(function, new) => {
             ctx.names.introduce(new);
-            Statement::Spawn(simplify_function_call(ctx, function))
+            simplify_function_call(ctx, function).map(Statement::Spawn)
         }
     }
 }
 
-fn simplify_fn(ctx: &mut Context, function: parser::FunctionDeclaration) -> FunctionDeclaration {
+fn simplify_fn(
+    ctx: &mut Context,
+    function: parser::FunctionDeclaration,
+) -> SimplifyResult<FunctionDeclaration> {
     ctx.functions.new_name(function.name);
     let arg_count = function.arg_names.len() as u32;
     ctx.reset_names();
     for arg_name in function.arg_names {
         ctx.names.introduce(arg_name);
     }
-    let body = transform_vec(function.body, |stmt| simplify_statement(ctx, stmt));
-    FunctionDeclaration { arg_count, body }
+    let body = simplify_vec(function.body, |stmt| simplify_statement(ctx, stmt))?;
+    Ok(FunctionDeclaration { arg_count, body })
 }
 
-fn simplify(syntax: parser::Syntax) -> Program {
+fn simplify(syntax: parser::Syntax) -> SimplifyResult<Program> {
     let mut ctx = Context::new();
-    let functions = transform_vec(syntax.functions, |func| simplify_fn(&mut ctx, func));
-    Program {
+    let functions = simplify_vec(syntax.functions, |func| simplify_fn(&mut ctx, func))?;
+    Ok(Program {
         string_table: ctx.strings,
         functions,
-    }
+    })
 }
