@@ -233,7 +233,7 @@ struct Program {
     /// The string table holds the string litterals in the program.
     string_table: StringTable,
     /// This holds information about the index of the main function.
-    main_function: Option<StackIndex>,
+    main_function: StackIndex,
     /// The top level function declarations making up the program.
     ///
     /// The function called "main" is the entry point of the program.
@@ -244,6 +244,8 @@ struct Program {
 enum SimplifyError {
     /// The program references a name that hasn't been defined
     UndefinedName(String),
+    /// No main function has been defined in the program
+    NoMainFunction,
 }
 
 type SimplifyResult<T> = Result<T, SimplifyError>;
@@ -322,9 +324,11 @@ fn simplify_fn(
 fn simplify(syntax: parser::Syntax) -> SimplifyResult<Program> {
     let mut ctx = Context::new();
     let functions = simplify_vec(syntax.functions, |func| simplify_fn(&mut ctx, func))?;
+    let main_index = ctx.functions.main_index;
+    let main_function = main_index.ok_or(SimplifyError::NoMainFunction)?;
     Ok(Program {
         string_table: ctx.strings,
-        main_function: ctx.functions.main_index,
+        main_function,
         functions,
     })
 }
@@ -339,14 +343,23 @@ mod test {
         let syntax = parser::collect_errors_and_parse(source).unwrap();
         let result = simplify(syntax);
         let functions = vec![
-            FunctionDeclaration { arg_count: 1, body: Vec::new() },
-            FunctionDeclaration { arg_count: 2, body: Vec::new() },
-            FunctionDeclaration { arg_count: 0, body: Vec::new() },
+            FunctionDeclaration {
+                arg_count: 1,
+                body: Vec::new(),
+            },
+            FunctionDeclaration {
+                arg_count: 2,
+                body: Vec::new(),
+            },
+            FunctionDeclaration {
+                arg_count: 0,
+                body: Vec::new(),
+            },
         ];
         let expected = Program {
             string_table: StringTable::new(),
             main_function: Some(StackIndex(2)),
-            functions
+            functions,
         };
         assert_eq!(result, Ok(expected));
     }
