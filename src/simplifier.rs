@@ -232,6 +232,8 @@ impl Context {
 struct Program {
     /// The string table holds the string litterals in the program.
     string_table: StringTable,
+    /// This holds information about the index of the main function.
+    main_function: Option<StackIndex>,
     /// The top level function declarations making up the program.
     ///
     /// The function called "main" is the entry point of the program.
@@ -322,6 +324,7 @@ fn simplify(syntax: parser::Syntax) -> SimplifyResult<Program> {
     let functions = simplify_vec(syntax.functions, |func| simplify_fn(&mut ctx, func))?;
     Ok(Program {
         string_table: ctx.strings,
+        main_function: ctx.functions.main_index,
         functions,
     })
 }
@@ -342,6 +345,7 @@ mod test {
         ];
         let expected = Program {
             string_table: StringTable::new(),
+            main_function: Some(StackIndex(2)),
             functions
         };
         assert_eq!(result, Ok(expected));
