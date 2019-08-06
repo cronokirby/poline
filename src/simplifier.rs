@@ -325,3 +325,25 @@ fn simplify(syntax: parser::Syntax) -> SimplifyResult<Program> {
         functions,
     })
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn simplify_works_on_function_names() {
+        let source = "fn one(a) {} fn two(a, b) {} fn main() {}";
+        let syntax = parser::collect_errors_and_parse(source).unwrap();
+        let result = simplify(syntax);
+        let functions = vec![
+            FunctionDeclaration { arg_count: 1, body: Vec::new() },
+            FunctionDeclaration { arg_count: 2, body: Vec::new() },
+            FunctionDeclaration { arg_count: 0, body: Vec::new() },
+        ];
+        let expected = Program {
+            string_table: StringTable::new(),
+            functions
+        };
+        assert_eq!(result, Ok(expected));
+    }
+}
