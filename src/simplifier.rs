@@ -411,4 +411,30 @@ mod test {
         };
         assert_eq!(result, Ok(expected));
     }
+
+    #[test]
+    fn simplify_can_handle_string_litterals() {
+        let source = "fn foo() { print \"A\"; } fn main() { print \"A\"; }";
+        let syntax = parser::collect_errors_and_parse(source).unwrap();
+        let result = simplify(syntax);
+        let functions = vec![
+            FunctionDeclaration {
+                arg_count: 0,
+                body: vec![Statement::Print(Argument::Str(StringIndex(0)))]
+            },
+            FunctionDeclaration {
+                arg_count: 0,
+                body: vec![Statement::Print(Argument::Str(StringIndex(1)))]
+            }
+        ];
+        let mut string_table = StringTable::new();
+        string_table.insert("A".into());
+        string_table.insert("A".into());
+        let expected = Program {
+            string_table,
+            main_function: StackIndex(1),
+            functions
+        };
+        assert_eq!(result, Ok(expected));
+    }
 }
