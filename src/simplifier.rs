@@ -6,7 +6,6 @@
 //! an index form instead of relying on string litterals.
 use crate::parser;
 use std::collections::HashMap;
-use std::iter::*;
 
 /// Represents a De Bruijin-esque index, instead of a variable name.
 ///
@@ -358,8 +357,39 @@ mod test {
         ];
         let expected = Program {
             string_table: StringTable::new(),
-            main_function: Some(StackIndex(2)),
+            main_function: StackIndex(2),
             functions,
+        };
+        assert_eq!(result, Ok(expected));
+    }
+
+    #[test]
+    fn simplify_can_rename_variables_in_statements() {
+        let source = "fn main(a, b) { print a; recv a; print a; spawn main(a, b) as p; }";
+        let syntax = parser::collect_errors_and_parse(source).unwrap();
+        let result = simplify(syntax);
+        let body = vec![
+            Statement::Print(Argument::Name(StackIndex(0))),
+            Statement::Recv,
+            Statement::Print(Argument::Name(StackIndex(2))),
+            Statement::Spawn(FunctionCall {
+                name: StackIndex(0),
+                args: vec![
+                    Argument::Name(StackIndex(2)),
+                    Argument::Name(StackIndex(1))
+                ]
+            })
+        ];
+        let functions = vec![
+            FunctionDeclaration {
+                arg_count: 2,
+                body
+            }
+        ];
+        let expected = Program {
+            string_table: StringTable::new(),
+            main_function: StackIndex(0),
+            functions
         };
         assert_eq!(result, Ok(expected));
     }
