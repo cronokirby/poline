@@ -364,25 +364,43 @@ mod test {
     }
 
     #[test]
-    fn simplify_can_rename_variables_in_statements() {
-        let source = "fn main(a, b) { print a; recv a; print a; spawn main(a, b) as p; }";
+    fn simplify_can_handle_shadowing() {
+        let source = "fn main(a) { recv a; print a; }";
         let syntax = parser::collect_errors_and_parse(source).unwrap();
         let result = simplify(syntax);
         let body = vec![
-            Statement::Print(Argument::Name(StackIndex(0))),
             Statement::Recv,
-            Statement::Print(Argument::Name(StackIndex(2))),
-            Statement::Spawn(FunctionCall {
-                name: StackIndex(0),
-                args: vec![
-                    Argument::Name(StackIndex(2)),
-                    Argument::Name(StackIndex(1))
-                ]
-            })
+            Statement::Print(Argument::Name(StackIndex(1)))
         ];
         let functions = vec![
             FunctionDeclaration {
-                arg_count: 2,
+                arg_count: 1,
+                body
+            }
+        ];
+        let expected = Program {
+            string_table: StringTable::new(),
+            main_function: StackIndex(0),
+            functions
+        };
+        assert_eq!(result, Ok(expected));
+    }
+
+    #[test]
+    fn simplify_can_handle_spawn_and_send() {
+        let source = "fn main() { spawn main() as p; send p to p; }";
+        let syntax = parser::collect_errors_and_parse(source).unwrap();
+        let result = simplify(syntax);
+        let body = vec![
+            Statement::Spawn(FunctionCall {
+                name: StackIndex(0),
+                args: vec![]
+            }),
+            Statement::Send(Argument::Name(StackIndex(0)), StackIndex(0))
+        ];
+        let functions = vec![
+            FunctionDeclaration {
+                arg_count: 0,
                 body
             }
         ];
