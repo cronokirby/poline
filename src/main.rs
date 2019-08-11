@@ -5,7 +5,7 @@ use std::io::prelude::*;
 mod parser;
 use parser::collect_errors_and_parse;
 mod interpreter;
-use interpreter::interpret;
+use interpreter::{RealProgramIO, interpret};
 mod simplifier;
 use simplifier::simplify;
 
@@ -22,6 +22,6 @@ fn main() -> io::Result<()> {
     println!("Simplifying...");
     let program = simplify(syntax).unwrap_or_else(|e| panic!("Error simplifying: {:?}", e));
     println!("Interpreting..\n");
-    interpret(program);
+    interpret(&mut RealProgramIO, program);
     Ok(())
 }
