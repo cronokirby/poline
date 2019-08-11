@@ -41,7 +41,7 @@ use std::collections::HashMap;
 /// The last call becomes `bar(0, 1, 2)` based on the positions of each variable
 /// in the stack.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct StackIndex(u32);
+pub struct StackIndex(pub u32);
 
 /// Represents an index into the string litteral table.
 ///
@@ -49,7 +49,7 @@ struct StackIndex(u32);
 /// table, and use indices into this table in the AST instead. This makes
 /// manipulating the AST a bit easier.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct StringIndex(u32);
+pub struct StringIndex(pub u32);
 
 /// Represents an Argument, either as a string litteral or a variable.
 ///
@@ -57,7 +57,7 @@ struct StringIndex(u32);
 /// which always reference the nth variable on the stack when interpreting the stack.
 /// String litterals reference the nth string in the litteral table.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Argument {
+pub enum Argument {
     /// Represents a reference to a named variable.
     Name(StackIndex),
     /// Represents a string litteral.
@@ -69,16 +69,16 @@ enum Argument {
 /// A function call is defined by the name of the function being called,
 /// as well as the arguments being passed to the function.
 #[derive(Clone, Debug, PartialEq)]
-struct FunctionCall {
+pub struct FunctionCall {
     /// The index giving us the name, and thus code, for the function.
-    name: StackIndex,
+    pub name: StackIndex,
     /// The arguments being passed to the function.
-    args: Vec<Argument>,
+    pub args: Vec<Argument>,
 }
 
 /// Holds information defining a given statement.
 #[derive(Clone, Debug, PartialEq)]
-enum Statement {
+pub enum Statement {
     /// Represents printing an argument to the console.
     Print(Argument),
     /// Receive a value into a new variable.
@@ -98,13 +98,13 @@ enum Statement {
 ///
 /// This information is sufficient to be able to call the given function.
 #[derive(Clone, Debug, PartialEq)]
-struct FunctionDeclaration {
+pub struct FunctionDeclaration {
     /// The number of arguments a function takes.
     ///
     /// At this stage, the names of the variables have been eliminated.
-    arg_count: u32,
+    pub arg_count: u32,
     /// A sequence of statements making up the function.
-    body: Vec<Statement>,
+    pub body: Vec<Statement>,
 }
 
 /// Represents the table of string litterals in our program.
@@ -112,7 +112,7 @@ struct FunctionDeclaration {
 /// We store all of the string litterals in the program in a single table,
 /// to make the representation of the program a bit simpler.
 #[derive(Clone, Debug, PartialEq)]
-struct StringTable(Vec<String>);
+pub struct StringTable(Vec<String>);
 
 impl StringTable {
     fn new() -> Self {
@@ -134,9 +134,13 @@ impl StringTable {
 
 /// This is the context used when generating new statements.
 ///
+/// This struct should be reset at the beginning of each new function.
+///
 /// The context allows us to map variable names to a stack index.
 struct NameContext {
-    names: HashMap<String, u32>,
+    /// This maps names we've encountered so far.
+    names: HashMap<String, StackIndex>,
+    /// This holds the latest variable index.
     index: u32,
 }
 
@@ -151,21 +155,30 @@ impl NameContext {
     // Replace a given name with its stack index.
     fn lookup(&mut self, name: String) -> SimplifyResult<StackIndex> {
         match self.names.get(&name) {
-            Some(&index) => Ok(StackIndex(index)),
+            Some(&index) => Ok(index),
             None => undefined_name(name),
         }
     }
 
     // Introduce a new variable into the context
     fn introduce(&mut self, s: String) {
-        self.names.insert(s, self.index);
+        self.names.insert(s, StackIndex(self.index));
         self.index += 1;
     }
 }
 
+/// This struct is used to replace function names with indices.
+///
+/// This holds mutable state about what functions we've encountered so far in order
+/// to replace references to these functions with indices.
 struct FunctionNames {
+    /// This maps function names to indices.
     name_to_index: HashMap<String, StackIndex>,
+    /// This holds the current stack index.
+    ///
+    /// This gets incremented for each new function declaration.
     index: u32,
+    /// Once we encounter the main function, this gets set to that.
     main_index: Option<StackIndex>,
 }
 
@@ -203,8 +216,14 @@ impl FunctionNames {
 /// This context carries things like the data surrounding name generation,
 /// as well as holding the future string litteral table.
 struct Context {
+    /// This will be used to store the string litterals we encounter.
     strings: StringTable,
+    /// The name context is used to keep track of variable names.
+    ///
+    /// The context is reset at the start of each function. It helps us replace
+    /// variable names with stack indices.
     names: NameContext,
+    /// This helps us replace named functions with indices.
     functions: FunctionNames,
 }
 
@@ -228,26 +247,39 @@ impl Context {
 
 /// Represents a simplified Poline program.
 #[derive(Clone, Debug, PartialEq)]
-struct Program {
+pub struct Program {
     /// The string table holds the string litterals in the program.
-    string_table: StringTable,
+    pub string_table: StringTable,
     /// This holds information about the index of the main function.
-    main_function: StackIndex,
+    ///
+    /// The main function will be used by the interpreter to start executing our program.
+    /// When simplifying the AST we parsed out, an error is thrown when no main function
+    /// is found.
+    pub main_function: StackIndex,
     /// The top level function declarations making up the program.
     ///
     /// The function called "main" is the entry point of the program.
-    functions: Vec<FunctionDeclaration>,
+    pub functions: Vec<FunctionDeclaration>,
 }
 
+/// This enum represents the different errors that can occurr when simplifying.
 #[derive(Clone, Debug, PartialEq)]
-enum SimplifyError {
-    /// The program references a name that hasn't been defined
+pub enum SimplifyError {
+    /// The program references a name that hasn't been defined.
+    ///
+    /// This can happen when an undefined variable is referenced, or when an undefined
+    /// function is called.
     UndefinedName(String),
-    /// No main function has been defined in the program
+    /// No main function has been defined in the program.
+    ///
+    /// We could catch this later in the program, but figuring this out now is a bit
+    /// easier for the interpreting stage. If we didn't report this now, the interpreting
+    /// stage would need to immediately, since it can't start interpreting without a main
+    /// function to start with.
     NoMainFunction,
 }
 
-type SimplifyResult<T> = Result<T, SimplifyError>;
+pub type SimplifyResult<T> = Result<T, SimplifyError>;
 
 fn undefined_name<T>(name: String) -> SimplifyResult<T> {
     Err(SimplifyError::UndefinedName(name))
@@ -320,7 +352,7 @@ fn simplify_fn(
     Ok(FunctionDeclaration { arg_count, body })
 }
 
-fn simplify(syntax: parser::Syntax) -> SimplifyResult<Program> {
+pub fn simplify(syntax: parser::Syntax) -> SimplifyResult<Program> {
     let mut ctx = Context::new();
     let functions = simplify_vec(syntax.functions, |func| simplify_fn(&mut ctx, func))?;
     let main_index = ctx.functions.main_index;
