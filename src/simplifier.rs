@@ -402,18 +402,13 @@ mod test {
         let result = simplify(syntax);
         let body = vec![
             Statement::Recv,
-            Statement::Print(Argument::Name(StackIndex(1)))
+            Statement::Print(Argument::Name(StackIndex(1))),
         ];
-        let functions = vec![
-            FunctionDeclaration {
-                arg_count: 1,
-                body
-            }
-        ];
+        let functions = vec![FunctionDeclaration { arg_count: 1, body }];
         let expected = Program {
             string_table: StringTable::new(),
             main_function: StackIndex(0),
-            functions
+            functions,
         };
         assert_eq!(result, Ok(expected));
     }
@@ -426,20 +421,15 @@ mod test {
         let body = vec![
             Statement::Spawn(FunctionCall {
                 name: StackIndex(0),
-                args: vec![]
+                args: vec![],
             }),
-            Statement::Send(Argument::Name(StackIndex(0)), StackIndex(0))
+            Statement::Send(Argument::Name(StackIndex(0)), StackIndex(0)),
         ];
-        let functions = vec![
-            FunctionDeclaration {
-                arg_count: 0,
-                body
-            }
-        ];
+        let functions = vec![FunctionDeclaration { arg_count: 0, body }];
         let expected = Program {
             string_table: StringTable::new(),
             main_function: StackIndex(0),
-            functions
+            functions,
         };
         assert_eq!(result, Ok(expected));
     }
@@ -452,12 +442,12 @@ mod test {
         let functions = vec![
             FunctionDeclaration {
                 arg_count: 0,
-                body: vec![Statement::Print(Argument::Str(StringIndex(0)))]
+                body: vec![Statement::Print(Argument::Str(StringIndex(0)))],
             },
             FunctionDeclaration {
                 arg_count: 0,
-                body: vec![Statement::Print(Argument::Str(StringIndex(1)))]
-            }
+                body: vec![Statement::Print(Argument::Str(StringIndex(1)))],
+            },
         ];
         let mut string_table = StringTable::new();
         string_table.insert("A".into());
@@ -465,7 +455,7 @@ mod test {
         let expected = Program {
             string_table,
             main_function: StackIndex(1),
-            functions
+            functions,
         };
         assert_eq!(result, Ok(expected));
     }
