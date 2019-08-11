@@ -4,7 +4,10 @@ use std::io::prelude::*;
 
 mod parser;
 use parser::collect_errors_and_parse;
+mod interpreter;
+use interpreter::interpret;
 mod simplifier;
+use simplifier::simplify;
 
 fn main() -> io::Result<()> {
     let mut args = std::env::args();
@@ -13,10 +16,12 @@ fn main() -> io::Result<()> {
     let mut file = File::open(file_name)?;
     let mut contents = String::new();
     file.read_to_string(&mut contents)?;
-    let result = collect_errors_and_parse(&contents);
-    match result {
-        Err(e) => println!("Error parsing: {:?}", e),
-        Ok(syn) => println!("Parse result: {:?}", syn),
-    }
+    println!("Parsing...");
+    let syntax =
+        collect_errors_and_parse(&contents).unwrap_or_else(|e| panic!("Error parsing: {:?}", e));
+    println!("Simplifying...");
+    let program = simplify(syntax).unwrap_or_else(|e| panic!("Error simplifying: {:?}", e));
+    println!("Interpreting..\n");
+    interpret(program);
     Ok(())
 }
