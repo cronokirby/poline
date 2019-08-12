@@ -270,7 +270,17 @@ impl<'prg, I: ProgramIO> Interpreter<'prg, I> {
                 }
                 self.threads.call(self.program, call.name, vars);
             }
-            Statement::Spawn(_) => panic!("Unimplemented statement: Spawn"),
+            Statement::Spawn(call) => {
+                let mut vars = Vec::new();
+                for arg in &call.args {
+                    let var = match *arg {
+                        Argument::Str(index) => Variable::Str(index),
+                        Argument::Name(index) => self.threads.get_var(index),
+                    };
+                    vars.push(var);
+                }
+                self.threads.spawn(self.program, call.name, vars);
+            }
             Statement::Print(arg) => self.print_argument(*arg),
         }
     }
@@ -348,6 +358,14 @@ mod test {
         let source = "fn p(a) { print a; } fn main() { p(); }";
         let output = run_panic(source);
         let expected = vec!["undefined"];
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn interpreter_can_spawn_functions() {
+        let source = "fn p(a) { print a; } fn main() { spawn p(\"A\") as x; p(\"B\"); }";
+        let output = run_panic(source);
+        let expected = vec!["B", "A"];
         assert_eq!(output, expected);
     }
 }
