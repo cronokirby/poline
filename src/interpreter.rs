@@ -128,11 +128,107 @@ impl Frames {
     }
 }
 
+/// This enum represents the state of a thread.
+///
+/// A thread is a logicial unit of execution in the interpreter.
+///
+/// A thread is either somewhere in a function, or stopped, after reaching the end of
+/// its function calls.
+enum ThreadState {
+    /// This thread is running with a certain state in its stack frames.
+    Running(Frames),
+    /// This thread is done, after having run through all its stack frames.
+    Done,
+}
+
+impl ThreadState {
+    fn is_done(&self) -> bool {
+        match self {
+            ThreadState::Running(_) => false,
+            ThreadState::Done => true,
+        }
+    }
+}
+
+/// This holds the information about where the execution of each thread is.
+///
+/// We can use this to keep track of our current position in the various threads,
+/// and automatically fetch the next statement to execute.
+struct Threads {
+    /// This holds the index of the current state we're working on.
+    current_thread: usize,
+    /// This holds the list of thread states that currently exist.
+    ///
+    /// We try and reuse slots that have finished executing.
+    threads: Vec<ThreadState>,
+}
+
+impl Threads {
+    fn new() -> Self {
+        Self {
+            current_thread: 0,
+            threads: Vec::new(),
+        }
+    }
+
+    fn call<'prg>(&mut self, program: &'prg Program, function: StackIndex, args: Vec<Variable>) {
+        match &mut self.threads[self.current_thread] {
+            ThreadState::Running(frames) => frames.call(program, function, args),
+            ThreadState::Done => panic!(
+                "Tried to call function on done thread #{}",
+                self.current_thread
+            ),
+        }
+    }
+
+    fn spawn<'prg>(&mut self, program: &'prg Program, function: StackIndex, args: Vec<Variable>) {
+        let mut frames = Frames::new();
+        frames.call(program, function, args);
+        let new_thread = ThreadState::Running(frames);
+        let first_done = self.threads.iter_mut().find(|x| x.is_done());
+        match first_done {
+            None => self.threads.push(new_thread),
+            Some(thread) => *thread = new_thread,
+        }
+    }
+
+    // This will return None when all threads have finished executing.
+    fn next_stmt<'prg>(&mut self, program: &'prg Program) -> Option<&'prg Statement> {
+        let start_thread = self.current_thread;
+        let thread_count = self.threads.len();
+        // We loop over every index, started with the current and wrapping around.
+        for i in start_thread..start_thread + thread_count {
+            self.current_thread = i;
+            if i >= thread_count {
+                self.current_thread -= start_thread;
+            }
+            if let ThreadState::Running(frames) = &mut self.threads[self.current_thread] {
+                let next_stmt = frames.next_stmt(program);
+                if next_stmt.is_some() {
+                    return next_stmt;
+                }
+            }
+        }
+        None
+    }
+
+    // This assumes we're not at the end of the thread calls
+    fn get_var(&self, index: StackIndex) -> Variable {
+        match &self.threads[self.current_thread] {
+            ThreadState::Running(frames) => frames.get_var(index),
+            ThreadState::Done => panic!(
+                "Tried to get variable #{} on done thread #{}",
+                index.0, self.current_thread
+            ),
+        }
+    }
+}
+
 /// This holds all the context that the interpreter needs.
 struct Interpreter<'prg, I> {
     io: I,
     program: &'prg Program,
-    frames: Frames,
+    threads: Threads,
 }
 
 impl<'prg, I> Interpreter<'prg, I> {
@@ -140,7 +236,7 @@ impl<'prg, I> Interpreter<'prg, I> {
         Self {
             io,
             program,
-            frames: Frames::new(),
+            threads: Threads::new(),
         }
     }
 }
@@ -150,7 +246,7 @@ impl<'prg, I: ProgramIO> Interpreter<'prg, I> {
         match arg {
             Argument::Str(index) => self.io.print(self.program.string_table.get(index)),
             Argument::Name(index) => {
-                let msg = match self.frames.get_var(index) {
+                let msg = match self.threads.get_var(index) {
                     Variable::Str(index) => self.program.string_table.get(index),
                     Variable::Undefined => &"undefined",
                 };
@@ -168,11 +264,11 @@ impl<'prg, I: ProgramIO> Interpreter<'prg, I> {
                 for arg in &call.args {
                     let var = match *arg {
                         Argument::Str(index) => Variable::Str(index),
-                        Argument::Name(index) => self.frames.get_var(index),
+                        Argument::Name(index) => self.threads.get_var(index),
                     };
                     vars.push(var);
                 }
-                self.frames.call(self.program, call.name, vars);
+                self.threads.call(self.program, call.name, vars);
             }
             Statement::Spawn(_) => panic!("Unimplemented statement: Spawn"),
             Statement::Print(arg) => self.print_argument(*arg),
@@ -180,9 +276,9 @@ impl<'prg, I: ProgramIO> Interpreter<'prg, I> {
     }
 
     fn main_function(&mut self) {
-        self.frames
-            .call(self.program, self.program.main_function, Vec::new());
-        while let Some(stmt) = self.frames.next_stmt(self.program) {
+        self.threads
+            .spawn(self.program, self.program.main_function, Vec::new());
+        while let Some(stmt) = self.threads.next_stmt(self.program) {
             self.statement(stmt);
         }
     }
