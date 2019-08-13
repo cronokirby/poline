@@ -202,10 +202,13 @@ impl Threads {
             if i >= thread_count {
                 self.current_thread -= start_thread;
             }
-            if let ThreadState::Running(frames) = &mut self.threads[self.current_thread] {
+            let next_thread = &mut self.threads[self.current_thread];
+            if let ThreadState::Running(frames) = next_thread {
                 let next_stmt = frames.next_stmt(program);
                 if next_stmt.is_some() {
                     return next_stmt;
+                } else {
+                    *next_thread = ThreadState::Done;
                 }
             }
         }
