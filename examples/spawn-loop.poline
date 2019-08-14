@@ -1,0 +1,4 @@
+fn main() {
+   print "main again";
+   spawn main() as p;
+}
