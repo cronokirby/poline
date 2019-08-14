@@ -39,7 +39,6 @@ enum Variable {
 ///
 /// The initial arguments to a function are passed to its stack, and further introduction
 /// of arguments create new elements on its stack.
-#[derive(Debug)]
 struct Stack(Vec<Variable>);
 
 impl Stack {
@@ -49,7 +48,6 @@ impl Stack {
 }
 
 /// This hold information about where we are in the execution of a function.
-#[derive(Debug)]
 struct FunctionState {
     /// The index of the declaration we're at in the function.
     statement: usize,
@@ -89,7 +87,6 @@ impl FunctionState {
 /// In addition to holding the nested stacks, this holds the information about where
 /// in each function call we are, so we can resume interpreting a function after ending
 /// a call.
-#[derive(Debug)]
 struct Frames {
     /// This is the actual layer of Function calls so far.
     ///
@@ -137,7 +134,6 @@ impl Frames {
 ///
 /// A thread is either somewhere in a function, or stopped, after reaching the end of
 /// its function calls.
-#[derive(Debug)]
 enum ThreadState {
     /// This thread is running with a certain state in its stack frames.
     Running(Frames),
@@ -145,89 +141,21 @@ enum ThreadState {
     Done,
 }
 
-impl ThreadState {
-    fn is_done(&self) -> bool {
-        match self {
-            ThreadState::Running(_) => false,
-            ThreadState::Done => true,
-        }
-    }
-}
-
 /// This holds the information about where the execution of each thread is.
 ///
 /// We can use this to keep track of our current position in the various threads,
 /// and automatically fetch the next statement to execute.
-struct Threads {
-    /// This holds the index of the current state we're working on.
-    current_thread: usize,
-    /// This holds the list of thread states that currently exist.
-    ///
-    /// We try and reuse slots that have finished executing.
-    threads: Vec<ThreadState>,
-}
+struct Threads(Vec<ThreadState>);
 
 impl Threads {
     fn new() -> Self {
-        Self {
-            current_thread: 0,
-            threads: Vec::new(),
-        }
-    }
-
-    fn call<'prg>(&mut self, program: &'prg Program, function: StackIndex, args: Vec<Variable>) {
-        match &mut self.threads[self.current_thread] {
-            ThreadState::Running(frames) => frames.call(program, function, args),
-            ThreadState::Done => panic!(
-                "Tried to call function on done thread #{}",
-                self.current_thread
-            ),
-        }
+        Self(Vec::new())
     }
 
     fn spawn<'prg>(&mut self, program: &'prg Program, function: StackIndex, args: Vec<Variable>) {
         let mut frames = Frames::new();
         frames.call(program, function, args);
-        let new_thread = ThreadState::Running(frames);
-        let first_done = self.threads.iter_mut().find(|x| x.is_done());
-        match first_done {
-            None => self.threads.push(new_thread),
-            Some(thread) => *thread = new_thread,
-        }
-    }
-
-    // This will return None when all threads have finished executing.
-    fn next_stmt<'prg>(&mut self, program: &'prg Program) -> Option<&'prg Statement> {
-        let thread_count = self.threads.len();
-        // We loop over every index, started with the current and wrapping around.
-        for _ in 0..thread_count {
-            let next_thread = &mut self.threads[self.current_thread];
-            if let ThreadState::Running(frames) = next_thread {
-                let next_stmt = frames.next_stmt(program);
-                if next_stmt.is_some() {
-                    return next_stmt;
-                } else {
-                    *next_thread = ThreadState::Done;
-                }
-            }
-
-            self.current_thread += 1;
-            if self.current_thread >= thread_count {
-                self.current_thread -= thread_count;
-            }
-        }
-        None
-    }
-
-    // This assumes we're not at the end of the thread calls
-    fn get_var(&self, index: StackIndex) -> Variable {
-        match &self.threads[self.current_thread] {
-            ThreadState::Running(frames) => frames.get_var(index),
-            ThreadState::Done => panic!(
-                "Tried to get variable #{} on done thread #{}",
-                index.0, self.current_thread
-            ),
-        }
+        self.0.push(ThreadState::Running(frames));
     }
 }
 
@@ -235,7 +163,7 @@ impl Threads {
 struct Interpreter<'prg, I> {
     io: I,
     program: &'prg Program,
-    threads: Threads,
+    frames: Frames,
 }
 
 impl<'prg, I> Interpreter<'prg, I> {
@@ -243,7 +171,7 @@ impl<'prg, I> Interpreter<'prg, I> {
         Self {
             io,
             program,
-            threads: Threads::new(),
+            frames: Frames::new(),
         }
     }
 }
@@ -253,7 +181,7 @@ impl<'prg, I: ProgramIO> Interpreter<'prg, I> {
         match arg {
             Argument::Str(index) => self.io.print(self.program.string_table.get(index)),
             Argument::Name(index) => {
-                let msg = match self.threads.get_var(index) {
+                let msg = match self.frames.get_var(index) {
                     Variable::Str(index) => self.program.string_table.get(index),
                     Variable::Undefined => &"undefined",
                 };
@@ -271,31 +199,21 @@ impl<'prg, I: ProgramIO> Interpreter<'prg, I> {
                 for arg in &call.args {
                     let var = match *arg {
                         Argument::Str(index) => Variable::Str(index),
-                        Argument::Name(index) => self.threads.get_var(index),
+                        Argument::Name(index) => self.frames.get_var(index),
                     };
                     vars.push(var);
                 }
-                self.threads.call(self.program, call.name, vars);
+                self.frames.call(self.program, call.name, vars);
             }
-            Statement::Spawn(call) => {
-                let mut vars = Vec::new();
-                for arg in &call.args {
-                    let var = match *arg {
-                        Argument::Str(index) => Variable::Str(index),
-                        Argument::Name(index) => self.threads.get_var(index),
-                    };
-                    vars.push(var);
-                }
-                self.threads.spawn(self.program, call.name, vars);
-            }
+            Statement::Spawn(_) => panic!("Unimplemented statement: Spawn"),
             Statement::Print(arg) => self.print_argument(*arg),
         }
     }
 
     fn main_function(&mut self) {
-        self.threads
-            .spawn(self.program, self.program.main_function, Vec::new());
-        while let Some(stmt) = self.threads.next_stmt(self.program) {
+        self.frames
+            .call(self.program, self.program.main_function, Vec::new());
+        while let Some(stmt) = self.frames.next_stmt(self.program) {
             self.statement(stmt);
         }
     }
@@ -365,14 +283,6 @@ mod test {
         let source = "fn p(a) { print a; } fn main() { p(); }";
         let output = run_panic(source);
         let expected = vec!["undefined"];
-        assert_eq!(output, expected);
-    }
-
-    #[test]
-    fn interpreter_can_spawn_functions() {
-        let source = "fn p(a) { print a; } fn main() { spawn p(\"A\") as x; p(\"B\"); }";
-        let output = run_panic(source);
-        let expected = vec!["B", "A"];
         assert_eq!(output, expected);
     }
 }
