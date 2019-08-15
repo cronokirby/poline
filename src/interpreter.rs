@@ -13,12 +13,15 @@ pub trait ProgramIO {
 ///
 /// This is the main struct to use in practice. This struct doesn't actually contain
 /// any data, it simply acts as a marker for the right trait implementation.
+///
+/// This struct implements the trait by actually printing to stdout. Each message
+/// has a newline added to it. This is similar to other dynamic languages like python.
 #[derive(Clone, Copy, Debug)]
 pub struct RealProgramIO;
 
 impl ProgramIO for &mut RealProgramIO {
     fn print(&mut self, message: &str) {
-        print!("{}", message);
+        println!("{}", message);
     }
 }
 
@@ -31,7 +34,8 @@ enum Variable {
     Str(StringIndex),
     /// An undefined variable.
     ///
-    /// This happens when a function is missing arguments.
+    /// This happens when a function is missing arguments. When not enough arguments
+    /// are passed to a function, the rest are filled in with this branch.
     Undefined,
 }
 
@@ -51,7 +55,7 @@ impl Stack {
 /// This hold information about where we are in the execution of a function.
 #[derive(Debug)]
 struct FunctionState {
-    /// The index of the declaration we're at in the function.
+    /// The index of the statement we're at in the function.
     statement: usize,
     /// The original declaration we're interpreting.
     function: StackIndex,
@@ -142,6 +146,8 @@ enum ThreadState {
     /// This thread is running with a certain state in its stack frames.
     Running(Frames),
     /// This thread is done, after having run through all its stack frames.
+    ///
+    /// Once a thread enters this state, it never starts running again.
     Done,
 }
 
