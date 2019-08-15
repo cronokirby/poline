@@ -27,11 +27,19 @@ impl ProgramIO for &mut RealProgramIO {
 
 /// Represents a reference to a given thread.
 ///
-/// This is created when we use the spawn statement.
-///
-/// A newtype is used here to avoid confusing this type of index with others.
+/// This contains information about where we've located the thread in memory,
+/// and provides a unique identifier for sending things to this thread. We don't
+/// want to confuse the two to prevent a thread receiving a message
 #[derive(Clone, Copy, Debug)]
-struct ThreadIndex(usize);
+struct ThreadRef {
+    /// This is the slot the thread happens to occupy.
+    slot: usize,
+    /// This identifies the thread uniquely.
+    ///
+    /// For now this is intended to increment with every new thread. The first thread
+    /// spawned gets `logical: 0`, the next `logical: 1`, and so on.
+    logical: u32,
+}
 
 /// Represents a variable in the program.
 ///
@@ -41,7 +49,7 @@ enum Variable {
     /// A reference to a string litteral.
     Str(StringIndex),
     /// A reference to another spawned thread.
-    Thread(ThreadIndex),
+    Thread(ThreadRef),
     /// An undefined variable.
     ///
     /// This happens when a function is missing arguments. When not enough arguments
@@ -189,6 +197,16 @@ impl ThreadState {
 struct Threads {
     /// This holds the index of the current state we're working on.
     current_thread: usize,
+    /// This is the logical identifier the next spawned thread will use.
+    ///
+    /// We use the *next* identifier instead of the *last* identifier to have
+    /// a sensible starting state. If we used the *last* identifier, we'd have
+    /// to start at -1.
+    ///
+    /// This field is useful to guarantee that each thread has a unique increasing ID.
+    /// We use the increasing property of our IDs to easily figure out if a thread
+    /// is dead.
+    next_logical: u32,
     /// This holds the list of thread states that currently exist.
     ///
     /// We try and reuse slots that have finished executing.
@@ -199,6 +217,7 @@ impl Threads {
     fn new() -> Self {
         Self {
             current_thread: 0,
+            next_logical: 0,
             threads: Vec::new(),
         }
     }
@@ -218,21 +237,24 @@ impl Threads {
         program: &'prg Program,
         function: StackIndex,
         args: Vec<Variable>,
-    ) -> ThreadIndex {
+    ) -> ThreadRef {
         let mut frames = Frames::new();
         frames.call(program, function, args);
         let new_thread = ThreadState::Running(frames);
         let first_done = (0..self.threads.len()).find(|&i| self.threads[i].is_done());
-        match first_done {
+        let slot = match first_done {
             None => {
                 self.threads.push(new_thread);
-                ThreadIndex(self.threads.len() - 1)
+                self.threads.len() - 1
             }
             Some(i) => {
                 self.threads[i] = new_thread;
-                ThreadIndex(i)
+                i
             }
-        }
+        };
+        let logical = self.next_logical;
+        self.next_logical += 1;
+        ThreadRef { slot, logical }
     }
 
     // This will return None when all threads have finished executing.
@@ -304,8 +326,8 @@ impl<'prg, I: ProgramIO> Interpreter<'prg, I> {
             Argument::Name(index) => {
                 match self.threads.get_var(index) {
                     Variable::Str(index) => self.io.print(self.program.string_table.get(index)),
-                    Variable::Thread(ThreadIndex(i)) => {
-                        self.io.print(&format!("Thread#{}", i));
+                    Variable::Thread(ThreadRef { logical, .. }) => {
+                        self.io.print(&format!("Thread#{}", logical));
                     }
                     Variable::Undefined => self.io.print("undefined"),
                 };
@@ -433,6 +455,15 @@ mod test {
         let source = "fn foo() {} fn main() { spawn foo() as p; print p; }";
         let output = run_panic(source);
         let expected = vec!["Thread#1"];
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn threads_dont_reuse_identifiers() {
+        let source =
+            "fn c() {} fn b() { spawn c() as p; print p; } fn main() { spawn b() as p; print p; }";
+        let output = run_panic(source);
+        let expected = vec!["Thread#1", "Thread#2"];
         assert_eq!(output, expected);
     }
 }
