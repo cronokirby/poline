@@ -96,6 +96,10 @@ impl FunctionState {
     fn get_var(&self, index: StackIndex) -> Variable {
         self.stack.0[index.0 as usize]
     }
+
+    fn push(&mut self, var: Variable) {
+        self.stack.push(var);
+    }
 }
 
 /// This struct holds the information about where we all in function calls.
@@ -143,6 +147,11 @@ impl Frames {
         let last = self.calls.len() - 1;
         self.calls[last].get_var(index)
     }
+
+    fn push(&mut self, var: Variable) {
+        let last = self.calls.len() - 1;
+        self.calls[last].push(var);
+    }
 }
 
 /// This enum represents the state of a thread.
@@ -158,6 +167,9 @@ enum ThreadState {
     /// This thread is done, after having run through all its stack frames.
     ///
     /// Once a thread enters this state, it never starts running again.
+    ///
+    /// We do use this state to replace finished threads with new threads. These
+    /// new threads will share the same thread index as the old one.
     Done,
 }
 
@@ -201,14 +213,25 @@ impl Threads {
         }
     }
 
-    fn spawn<'prg>(&mut self, program: &'prg Program, function: StackIndex, args: Vec<Variable>) {
+    fn spawn<'prg>(
+        &mut self,
+        program: &'prg Program,
+        function: StackIndex,
+        args: Vec<Variable>,
+    ) -> ThreadIndex {
         let mut frames = Frames::new();
         frames.call(program, function, args);
         let new_thread = ThreadState::Running(frames);
-        let first_done = self.threads.iter_mut().find(|x| x.is_done());
+        let first_done = (0..self.threads.len()).find(|&i| self.threads[i].is_done());
         match first_done {
-            None => self.threads.push(new_thread),
-            Some(thread) => *thread = new_thread,
+            None => {
+                self.threads.push(new_thread);
+                ThreadIndex(self.threads.len() - 1)
+            }
+            Some(i) => {
+                self.threads[i] = new_thread;
+                ThreadIndex(i)
+            }
         }
     }
 
@@ -240,8 +263,18 @@ impl Threads {
         match &self.threads[self.current_thread] {
             ThreadState::Running(frames) => frames.get_var(index),
             ThreadState::Done => panic!(
-                "Tried to get variable #{} on done thread #{}",
+                "Tried to get variable #{} on done Thread#{}",
                 index.0, self.current_thread
+            ),
+        }
+    }
+
+    fn push(&mut self, var: Variable) {
+        match &mut self.threads[self.current_thread] {
+            ThreadState::Running(frames) => frames.push(var),
+            ThreadState::Done => panic!(
+                "Tried to push variable #{:?} on done Thread#{}",
+                var, self.current_thread
             ),
         }
     }
@@ -269,11 +302,13 @@ impl<'prg, I: ProgramIO> Interpreter<'prg, I> {
         match arg {
             Argument::Str(index) => self.io.print(self.program.string_table.get(index)),
             Argument::Name(index) => {
-                let msg = match self.threads.get_var(index) {
-                    Variable::Str(index) => self.program.string_table.get(index),
-                    Variable::Undefined => &"undefined",
+                match self.threads.get_var(index) {
+                    Variable::Str(index) => self.io.print(self.program.string_table.get(index)),
+                    Variable::Thread(ThreadIndex(i)) => {
+                        self.io.print(&format!("Thread#{}", i));
+                    }
+                    Variable::Undefined => self.io.print("undefined"),
                 };
-                self.io.print(msg)
             }
         }
     }
@@ -302,7 +337,8 @@ impl<'prg, I: ProgramIO> Interpreter<'prg, I> {
                     };
                     vars.push(var);
                 }
-                self.threads.spawn(self.program, call.name, vars);
+                let thread = self.threads.spawn(self.program, call.name, vars);
+                self.threads.push(Variable::Thread(thread));
             }
             Statement::Print(arg) => self.print_argument(*arg),
         }
@@ -389,6 +425,14 @@ mod test {
         let source = "fn p(a) { print a; } fn main() { spawn p(\"A\") as x; p(\"B\"); }";
         let output = run_panic(source);
         let expected = vec!["B", "A"];
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn interpreter_can_print_spawned_threads() {
+        let source = "fn foo() {} fn main() { spawn foo() as p; print p; }";
+        let output = run_panic(source);
+        let expected = vec!["Thread#1"];
         assert_eq!(output, expected);
     }
 }
