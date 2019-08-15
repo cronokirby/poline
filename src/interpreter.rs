@@ -25,6 +25,14 @@ impl ProgramIO for &mut RealProgramIO {
     }
 }
 
+/// Represents a reference to a given thread.
+///
+/// This is created when we use the spawn statement.
+///
+/// A newtype is used here to avoid confusing this type of index with others.
+#[derive(Clone, Copy, Debug)]
+struct ThreadIndex(usize);
+
 /// Represents a variable in the program.
 ///
 /// These are the actual values that get pushed to the stack and passed around.
@@ -32,6 +40,8 @@ impl ProgramIO for &mut RealProgramIO {
 enum Variable {
     /// A reference to a string litteral.
     Str(StringIndex),
+    /// A reference to another spawned thread.
+    Thread(ThreadIndex),
     /// An undefined variable.
     ///
     /// This happens when a function is missing arguments. When not enough arguments
