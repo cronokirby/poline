@@ -1,4 +1,5 @@
 use crate::simplifier::*;
+use std::collections::VecDeque;
 
 /// Represents the side effects poline programs need access to.
 ///
@@ -70,6 +71,26 @@ impl Stack {
     }
 }
 
+/// This holds the different variables send to a given thread.
+///
+/// Unlike a stack, this is used across all function invocations for a given thread.
+#[derive(Debug)]
+struct Mailbox(VecDeque<Variable>);
+
+impl Mailbox {
+    fn new() -> Self {
+        Self(VecDeque::new())
+    }
+
+    fn send(&mut self, var: Variable) {
+        self.0.push_front(var);
+    }
+
+    fn recv(&mut self) -> Option<Variable> {
+        self.0.pop_back()
+    }
+}
+
 /// This hold information about where we are in the execution of a function.
 #[derive(Debug)]
 struct FunctionState {
@@ -110,11 +131,11 @@ impl FunctionState {
     }
 }
 
-/// This struct holds the information about where we all in function calls.
+/// This struct holds the state for a given thread.
 ///
 /// In addition to holding the nested stacks, this holds the information about where
 /// in each function call we are, so we can resume interpreting a function after ending
-/// a call.
+/// a call. This also holds the mailbox for this thread.
 #[derive(Debug)]
 struct Frames {
     /// This is the actual layer of Function calls so far.
@@ -122,11 +143,16 @@ struct Frames {
     /// Each call holds information so that we can resume execution after popping the
     /// latest function off of the stack.
     calls: Vec<FunctionState>,
+    /// The mailbox containing all variables sent to this thread
+    mailbox: Mailbox,
 }
 
 impl Frames {
     fn new() -> Self {
-        Self { calls: Vec::new() }
+        Self {
+            calls: Vec::new(),
+            mailbox: Mailbox::new(),
+        }
     }
 
     fn call<'prg>(&mut self, program: &'prg Program, function: StackIndex, args: Vec<Variable>) {
@@ -160,6 +186,14 @@ impl Frames {
         let last = self.calls.len() - 1;
         self.calls[last].push(var);
     }
+
+    fn send(&mut self, var: Variable) {
+        self.mailbox.send(var)
+    }
+
+    fn recv(&mut self) -> Option<Variable> {
+        self.mailbox.recv()
+    }
 }
 
 /// This enum represents the state of a thread.
@@ -171,7 +205,7 @@ impl Frames {
 #[derive(Debug)]
 enum ThreadState {
     /// This thread is running with a certain state in its stack frames.
-    Running(Frames),
+    Running { blocked: bool, frames: Frames },
     /// This thread is done, after having run through all its stack frames.
     ///
     /// Once a thread enters this state, it never starts running again.
@@ -184,8 +218,29 @@ enum ThreadState {
 impl ThreadState {
     fn is_done(&self) -> bool {
         match self {
-            ThreadState::Running(_) => false,
+            ThreadState::Running { .. } => false,
             ThreadState::Done => true,
+        }
+    }
+
+    fn running(frames: Frames) -> Self {
+        ThreadState::Running {
+            blocked: false,
+            frames,
+        }
+    }
+
+    // We handle this here for unblocking logic
+    fn send(&mut self, var: Variable) {
+        match self {
+            ThreadState::Running {
+                ref mut blocked,
+                frames,
+            } => {
+                frames.send(var);
+                *blocked = false;
+            }
+            ThreadState::Done => {} // TODO: Maybe warn or something
         }
     }
 }
@@ -224,7 +279,7 @@ impl Threads {
 
     fn call<'prg>(&mut self, program: &'prg Program, function: StackIndex, args: Vec<Variable>) {
         match &mut self.threads[self.current_thread] {
-            ThreadState::Running(frames) => frames.call(program, function, args),
+            ThreadState::Running { frames, .. } => frames.call(program, function, args),
             ThreadState::Done => panic!(
                 "Tried to call function on done thread #{}",
                 self.current_thread
@@ -240,7 +295,10 @@ impl Threads {
     ) -> ThreadRef {
         let mut frames = Frames::new();
         frames.call(program, function, args);
-        let new_thread = ThreadState::Running(frames);
+        let new_thread = ThreadState::Running {
+            blocked: false,
+            frames,
+        };
         let first_done = (0..self.threads.len()).find(|&i| self.threads[i].is_done());
         let slot = match first_done {
             None => {
@@ -263,7 +321,11 @@ impl Threads {
         // We loop over every index, started with the current and wrapping around.
         for _ in 0..thread_count {
             let next_thread = &mut self.threads[self.current_thread];
-            if let ThreadState::Running(frames) = next_thread {
+            if let ThreadState::Running {
+                blocked: false,
+                frames,
+            } = next_thread
+            {
                 let next_stmt = frames.next_stmt(program);
                 if next_stmt.is_some() {
                     return next_stmt;
@@ -283,7 +345,7 @@ impl Threads {
     // This assumes we're not at the end of the thread calls
     fn get_var(&self, index: StackIndex) -> Variable {
         match &self.threads[self.current_thread] {
-            ThreadState::Running(frames) => frames.get_var(index),
+            ThreadState::Running { frames, .. } => frames.get_var(index),
             ThreadState::Done => panic!(
                 "Tried to get variable #{} on done Thread#{}",
                 index.0, self.current_thread
@@ -293,12 +355,31 @@ impl Threads {
 
     fn push(&mut self, var: Variable) {
         match &mut self.threads[self.current_thread] {
-            ThreadState::Running(frames) => frames.push(var),
+            ThreadState::Running { frames, .. } => frames.push(var),
             ThreadState::Done => panic!(
                 "Tried to push variable #{:?} on done Thread#{}",
                 var, self.current_thread
             ),
         }
+    }
+
+    /// This receives for the current thread.
+    fn recv(&mut self) {
+        match self.threads[self.current_thread] {
+            ThreadState::Done => panic!("Tried to recv on done Thread#{}", self.current_thread),
+            ThreadState::Running { blocked: true, .. } => {}
+            ThreadState::Running {
+                ref mut blocked,
+                ref mut frames,
+            } => match frames.recv() {
+                Some(already) => frames.push(already),
+                None => *blocked = true,
+            },
+        }
+    }
+
+    fn send(&mut self, var: Variable, to: ThreadRef) {
+        &mut self.threads[to.slot].send(var);
     }
 }
 
@@ -337,8 +418,21 @@ impl<'prg, I: ProgramIO> Interpreter<'prg, I> {
 
     fn statement(&mut self, statement: &Statement) {
         match statement {
-            Statement::Recv => panic!("Unimplemented statement: Recv"),
-            Statement::Send(_, _) => panic!("Unimplemented statement: Send"),
+            Statement::Recv => self.threads.recv(),
+            Statement::Send(arg, index) => {
+                let thread = match self.threads.get_var(*index) {
+                    Variable::Thread(t) => t,
+                    v => {
+                        let warning = format!("Warning: tried to send {:?} to {:?}", arg, v);
+                        return self.io.print(&warning);
+                    }
+                };
+                let var = match *arg {
+                    Argument::Str(index) => Variable::Str(index),
+                    Argument::Name(index) => self.threads.get_var(index),
+                };
+                self.threads.send(var, thread);
+            }
             Statement::Call(call) => {
                 let mut vars = Vec::new();
                 for arg in &call.args {
@@ -464,6 +558,14 @@ mod test {
             "fn c() {} fn b() { spawn c() as p; print p; } fn main() { spawn b() as p; print p; }";
         let output = run_panic(source);
         let expected = vec!["Thread#1", "Thread#2"];
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn interpreter_can_handle_basic_send_and_recieve() {
+        let source = "fn p() { recv x; print x; } fn main() { spawn p() as p; send \"2\" to p; print \"1\"; }";
+        let output = run_panic(source);
+        let expected = vec!["1", "2"];
         assert_eq!(output, expected);
     }
 }
