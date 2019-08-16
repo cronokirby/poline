@@ -379,7 +379,7 @@ impl Threads {
     }
 
     fn send(&mut self, var: Variable, to: ThreadRef) {
-        &mut self.threads[to.slot].send(var);
+        self.threads[to.slot].send(var);
     }
 }
 
